@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, onMounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatSessionStore } from '@/stores/chatSession'
 import { useUserProfileStore } from '@/stores/userProfile'
@@ -12,7 +12,7 @@ const router = useRouter()
 const chatStore = useChatSessionStore()
 const userStore = useUserProfileStore()
 const reportStore = useReportResultStore()
-const { canGenerateReport, completionPercentage } = useValidator()
+const { canGenerateReport } = useValidator()
 
 const messagesContainer = ref<HTMLElement | null>(null)
 const showQuestionnaireMode = ref(false)
