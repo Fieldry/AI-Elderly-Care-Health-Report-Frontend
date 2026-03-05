@@ -1,78 +1,82 @@
-import api from './index'
-import type { UserProfile } from '@/stores/userProfile'
+import http from './http'
+import type {
+  ChatMessage,
+  ChatMessageResponse,
+  ChatProgressResponse,
+  ChatStartResponse,
+  SessionDetail,
+  SessionMetadata
+} from '@/types'
 
-export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  timestamp: number
+const apiOrigin = import.meta.env.VITE_BACKEND_ORIGIN || ''
+
+function withOrigin(path: string): string {
+  return `${apiOrigin}${path}`
 }
 
-export interface ChatResponse {
-  message: string
-  nextQuestion?: string
-  fieldToUpdate?: string
-  completed?: boolean
-}
-
-/**
- * 发送对话消息
- */
-export async function sendMessage(
-  message: string,
-  sessionId: string,
-  context?: Partial<UserProfile>
-): Promise<ChatResponse> {
-  return api.post('/chat/message', {
-    message,
-    sessionId,
-    context
+export async function startChat(): Promise<ChatStartResponse> {
+  const response = await fetch(withOrigin('/chat/start'), {
+    method: 'POST'
   })
+  if (!response.ok) {
+    throw new Error(`启动会话失败: ${response.status}`)
+  }
+  return response.json()
 }
 
-/**
- * 获取对话历史
- */
-export async function getChatHistory(sessionId: string): Promise<ChatMessage[]> {
-  return api.get(`/chat/history/${sessionId}`)
-}
-
-/**
- * 开始新的评估对话
- */
-export async function startAssessment(): Promise<{ sessionId: string; welcomeMessage: string }> {
-  return api.post('/chat/start')
-}
-
-/**
- * 流式对话 - 使用 SSE
- */
-export function streamChat(
-  message: string,
+export async function sendChatMessage(
   sessionId: string,
-  onMessage: (chunk: string) => void,
-  onComplete: () => void,
-  onError: (error: Error) => void
-): () => void {
-  const eventSource = new EventSource(
-    `/api/chat/stream?message=${encodeURIComponent(message)}&sessionId=${sessionId}`
-  )
-
-  eventSource.onmessage = (event) => {
-    if (event.data === '[DONE]') {
-      eventSource.close()
-      onComplete()
-    } else {
-      onMessage(event.data)
-    }
+  message: string,
+  context?: Record<string, unknown>
+): Promise<ChatMessageResponse> {
+  const response = await fetch(withOrigin('/chat/message'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      sessionId,
+      message,
+      context
+    })
+  })
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`发送消息失败: ${text || response.statusText}`)
   }
+  return response.json()
+}
 
-  eventSource.onerror = (error) => {
-    eventSource.close()
-    onError(new Error('Stream connection failed'))
+export async function getChatProgress(sessionId: string): Promise<ChatProgressResponse> {
+  const response = await fetch(withOrigin(`/chat/progress/${sessionId}`))
+  if (!response.ok) {
+    throw new Error(`获取会话进度失败: ${response.status}`)
   }
+  return response.json()
+}
 
-  // 返回取消函数
-  return () => {
-    eventSource.close()
+export async function getChatProfile(sessionId: string): Promise<Record<string, unknown>> {
+  const response = await fetch(withOrigin(`/chat/profile/${sessionId}`))
+  if (!response.ok) {
+    throw new Error(`获取会话画像失败: ${response.status}`)
   }
+  return response.json()
+}
+
+export async function getChatHistory(sessionId: string): Promise<ChatMessage[]> {
+  const response = await fetch(withOrigin(`/chat/history/${sessionId}`))
+  if (!response.ok) {
+    throw new Error(`获取聊天记录失败: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function listSessions(): Promise<SessionMetadata[]> {
+  const { data } = await http.get<{ sessions: SessionMetadata[] }>('/sessions')
+  return data.sessions || []
+}
+
+export async function getSessionDetail(sessionId: string): Promise<SessionDetail> {
+  const { data } = await http.get<SessionDetail>(`/sessions/${sessionId}`)
+  return data
 }

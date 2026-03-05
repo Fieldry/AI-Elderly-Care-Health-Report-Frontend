@@ -1,15 +1,5 @@
-<script setup lang="ts">
-import { RouterView } from 'vue-router'
-</script>
-
 <template>
-  <div class="app-container">
-    <RouterView />
+  <div class="app-shell">
+    <router-view />
   </div>
 </template>
-
-<style>
-.app-container {
-  min-height: 100vh;
-}
-</style>

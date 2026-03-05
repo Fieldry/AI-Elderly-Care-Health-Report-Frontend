@@ -1,0 +1,412 @@
+:root {
+  --bg-0: #f4efe6;
+  --bg-1: #fdf7ea;
+  --bg-2: #e5dccf;
+  --ink: #2a2622;
+  --ink-soft: #57504a;
+  --card: rgba(255, 252, 247, 0.88);
+  --line: rgba(102, 91, 79, 0.2);
+  --brand: #0d5f56;
+  --brand-strong: #0b4d46;
+  --accent: #cf6a2a;
+  --danger: #9b2f2f;
+  --shadow: 0 20px 44px rgba(29, 24, 16, 0.13);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 8% 10%, rgba(13, 95, 86, 0.16), transparent 40%),
+    radial-gradient(circle at 90% 14%, rgba(207, 106, 42, 0.18), transparent 42%),
+    linear-gradient(160deg, var(--bg-0), var(--bg-1) 48%, var(--bg-2));
+  font-family: 'Noto Serif SC', 'Source Han Serif SC', 'STSong', serif;
+}
+
+button,
+textarea,
+input {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.home-page,
+.assessment-page {
+  width: min(1200px, 95vw);
+  margin: 0 auto;
+  padding: 32px 0 40px;
+}
+
+.hero-card {
+  max-width: 760px;
+  margin: 6vh auto 0;
+  padding: 46px 40px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+  animation: rise-in 0.6s ease;
+}
+
+.eyebrow {
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--brand);
+  font-size: 13px;
+  margin: 0;
+}
+
+.hero-card h1 {
+  margin: 14px 0 14px;
+  font-size: clamp(30px, 4vw, 42px);
+  line-height: 1.2;
+}
+
+.intro {
+  margin: 0 0 12px;
+  color: var(--ink-soft);
+  line-height: 1.65;
+}
+
+.feature-list {
+  margin: 0 0 26px;
+  padding-left: 18px;
+  color: var(--ink-soft);
+  line-height: 1.8;
+}
+
+.primary-btn,
+.accent-btn,
+.ghost-btn {
+  border: 0;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.16s ease, filter 0.16s ease;
+}
+
+.primary-btn,
+.accent-btn {
+  padding: 10px 16px;
+  color: #fff;
+}
+
+.primary-btn {
+  background: linear-gradient(120deg, var(--brand), var(--brand-strong));
+}
+
+.accent-btn {
+  background: linear-gradient(120deg, var(--accent), #b3531a);
+}
+
+.ghost-btn {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.45);
+  color: var(--ink);
+  padding: 8px 12px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+  transform: none;
+}
+
+button:not(:disabled):hover {
+  filter: brightness(1.04);
+  transform: translateY(-1px);
+}
+
+.assessment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.assessment-header h1 {
+  margin: 0;
+  font-size: clamp(24px, 3vw, 32px);
+}
+
+.assessment-layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 16px;
+}
+
+.history-sidebar,
+.chat-section {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+.history-sidebar {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 74vh;
+}
+
+.history-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.history-topbar h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.session-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+}
+
+.session-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.55);
+  color: inherit;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.session-item.active {
+  border-color: var(--brand);
+  background: rgba(13, 95, 86, 0.09);
+}
+
+.session-title {
+  margin: 0;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.session-meta,
+.session-tags {
+  margin: 4px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.chat-section {
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  overflow: hidden;
+  min-height: 74vh;
+}
+
+.progress-card {
+  border-bottom: 1px solid var(--line);
+  padding: 14px 16px;
+}
+
+.progress-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.progress-head p,
+.progress-sub {
+  margin: 0;
+  font-size: 13px;
+}
+
+.progress-track {
+  position: relative;
+  height: 12px;
+  background: rgba(89, 78, 66, 0.14);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--brand), #2da595);
+  transition: width 0.28s ease;
+}
+
+.chat-body {
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.message-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 88%;
+}
+
+.message-row.user {
+  margin-left: auto;
+  align-items: flex-end;
+}
+
+.message-role {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.message-bubble {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.message-row.user .message-bubble {
+  background: rgba(13, 95, 86, 0.1);
+  border-color: rgba(13, 95, 86, 0.24);
+}
+
+.report-events {
+  margin-top: 6px;
+  border-top: 1px dashed var(--line);
+  padding-top: 8px;
+  font-size: 13px;
+}
+
+.report-events h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.report-events p {
+  margin: 3px 0;
+  color: var(--ink-soft);
+}
+
+.chat-actions {
+  border-top: 1px solid var(--line);
+  padding: 12px 16px;
+}
+
+.chat-actions textarea {
+  width: 100%;
+  height: 90px;
+  resize: vertical;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.action-row {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.hint-text {
+  margin: 6px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.error-text {
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.report-panel {
+  border-top: 1px solid var(--line);
+  padding: 16px;
+  background: rgba(255, 251, 244, 0.92);
+  line-height: 1.7;
+}
+
+.report-panel h2,
+.report-panel h3 {
+  margin-top: 0;
+}
+
+.report-panel section + section {
+  margin-top: 12px;
+}
+
+.report-time,
+.report-label {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.report-panel ul {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 980px) {
+  .assessment-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .history-sidebar {
+    min-height: 220px;
+  }
+
+  .chat-section {
+    min-height: 70vh;
+  }
+}
+
+@media (max-width: 600px) {
+  .home-page,
+  .assessment-page {
+    width: 94vw;
+    padding-top: 20px;
+  }
+
+  .hero-card {
+    padding: 30px 22px;
+    border-radius: 18px;
+  }
+
+  .assessment-header {
+    flex-wrap: wrap;
+  }
+}
