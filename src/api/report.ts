@@ -13,6 +13,7 @@ interface ReportStreamPayload {
 
 interface ReportStreamHandlers {
   onStatus?: (event: AgentStatusEvent) => void
+  onChunk?: (chunk: string) => void
   onComplete?: (report: ReportData) => void
   onError?: (message: string) => void
 }
@@ -74,6 +75,11 @@ export async function streamReport(
 
           if (parsed.type === 'agent_status' && parsed.data) {
             handlers.onStatus?.(parsed.data as AgentStatusEvent)
+          } else if (parsed.type === 'report_chunk' && parsed.data) {
+            const chunk = (parsed.data as { content?: string })?.content || ''
+            if (chunk) {
+              handlers.onChunk?.(chunk)
+            }
           } else if (parsed.type === 'complete' && parsed.data) {
             handlers.onComplete?.(parsed.data as ReportData)
           } else if (parsed.type === 'error') {

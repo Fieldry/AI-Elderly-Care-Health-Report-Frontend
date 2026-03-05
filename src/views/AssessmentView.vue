@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import MarkdownIt from 'markdown-it'
 import {
   getChatHistory,
   getChatProfile,
@@ -32,9 +33,15 @@ const pendingGroups = ref<string[]>([])
 const isGeneratingReport = ref(false)
 const reportEvents = ref<AgentStatusEvent[]>([])
 const reportData = ref<ReportData | null>(null)
+const reportStreamText = ref('')
 const reportError = ref('')
 
 const chatBodyRef = ref<HTMLElement | null>(null)
+const md = new MarkdownIt({
+  html: false,
+  breaks: true,
+  linkify: true
+})
 
 const progressPercent = computed(() => Math.round(progress.value * 100))
 const canGenerateReport = computed(
@@ -68,6 +75,10 @@ function mapConversation(items: ChatMessage[] | null | undefined): ChatMessage[]
     content: item.content,
     timestamp: item.timestamp
   }))
+}
+
+function renderMarkdown(content: string) {
+  return md.render(content || '')
 }
 
 function formatDateTime(value?: string) {
@@ -144,6 +155,7 @@ async function selectSession(sessionId: string) {
   actionError.value = ''
   reportError.value = ''
   reportEvents.value = []
+  reportStreamText.value = ''
 
   try {
     activeSessionId.value = sessionId
@@ -168,6 +180,7 @@ async function createNewSession() {
   actionError.value = ''
   reportError.value = ''
   reportEvents.value = []
+  reportStreamText.value = ''
   reportData.value = null
 
   try {
@@ -241,6 +254,7 @@ async function generateReport() {
   isGeneratingReport.value = true
   reportError.value = ''
   reportEvents.value = []
+  reportStreamText.value = ''
 
   try {
     const profile = await getChatProfile(activeSessionId.value)
@@ -253,6 +267,9 @@ async function generateReport() {
       {
         onStatus(event) {
           reportEvents.value.push(event)
+        },
+        onChunk(chunk) {
+          reportStreamText.value += chunk
         },
         onComplete(report) {
           reportData.value = report
@@ -274,7 +291,12 @@ async function generateReport() {
 }
 
 watch(
-  () => [messages.value.length, reportEvents.value.length, reportData.value?.generatedAt],
+  () => [
+    messages.value.length,
+    reportEvents.value.length,
+    reportStreamText.value.length,
+    reportData.value?.generatedAt
+  ],
   async () => {
     await nextTick()
     if (chatBodyRef.value) {
@@ -351,7 +373,12 @@ onMounted(async () => {
             :class="message.role"
           >
             <p class="message-role">{{ message.role === 'user' ? '您' : '助手' }}</p>
-            <div class="message-bubble">{{ message.content }}</div>
+            <div
+              v-if="message.role === 'assistant'"
+              class="message-bubble markdown-body"
+              v-html="renderMarkdown(message.content)"
+            ></div>
+            <div v-else class="message-bubble">{{ message.content }}</div>
           </div>
 
           <div v-if="loadingSession" class="hint-text">会话加载中...</div>
@@ -363,6 +390,66 @@ onMounted(async () => {
           </div>
           <div v-if="reportError" class="error-text">{{ reportError }}</div>
           <div v-if="actionError" class="error-text">{{ actionError }}</div>
+
+          <div v-if="reportStreamText" class="message-row assistant">
+            <p class="message-role">报告流</p>
+            <div class="message-bubble markdown-body" v-html="renderMarkdown(reportStreamText)"></div>
+          </div>
+
+          <article v-if="reportData" class="report-panel">
+            <h2>健康报告结果</h2>
+            <p class="report-time">生成时间：{{ formatDateTime(reportData.generatedAt) }}</p>
+
+            <section>
+              <h3>1. 健康总结</h3>
+              <p>{{ reportData.summary }}</p>
+            </section>
+
+            <section>
+              <h3>2. 健康画像</h3>
+              <p>{{ reportData.healthPortrait.functionalStatus }}</p>
+              <p>优势：{{ reportData.healthPortrait.strengths.join('、') || '暂无' }}</p>
+              <p>问题：{{ reportData.healthPortrait.problems.join('、') || '暂无' }}</p>
+            </section>
+
+            <section>
+              <h3>3. 风险因素</h3>
+              <p class="report-label">短期风险（1-4周）</p>
+              <ul>
+                <li v-for="item in reportData.riskFactors.shortTerm" :key="`s-${item.name}`">
+                  {{ item.name }}（{{ item.level }}）：{{ item.description }}
+                </li>
+              </ul>
+              <p class="report-label">中期风险（1-6月）</p>
+              <ul>
+                <li v-for="item in reportData.riskFactors.midTerm" :key="`m-${item.name}`">
+                  {{ item.name }}（{{ item.level }}）：{{ item.description }}
+                </li>
+              </ul>
+            </section>
+
+            <section>
+              <h3>4. 行动建议</h3>
+              <p class="report-label">优先级 A</p>
+              <ul>
+                <li v-for="item in reportData.recommendations.priority1" :key="item.id">
+                  {{ item.title }}：{{ item.description }}
+                </li>
+              </ul>
+              <p class="report-label">优先级 B</p>
+              <ul>
+                <li v-for="item in reportData.recommendations.priority2" :key="item.id">
+                  {{ item.title }}：{{ item.description }}
+                </li>
+              </ul>
+              <p class="report-label">优先级 C</p>
+              <ul>
+                <li v-for="item in reportData.recommendations.priority3" :key="item.id">
+                  {{ item.title }}：{{ item.description }}
+                </li>
+              </ul>
+            </section>
+          </article>
         </div>
 
         <div class="chat-actions">
@@ -376,67 +463,9 @@ onMounted(async () => {
             <button class="primary-btn" :disabled="isSending || !inputText.trim()" @click="sendMessage">
               {{ isSending ? '发送中...' : '发送' }}
             </button>
-            <button class="accent-btn" :disabled="!canGenerateReport" @click="generateReport">
-              {{ isGeneratingReport ? '报告生成中...' : '生成最终报告' }}
-            </button>
           </div>
-          <p class="hint-text">当进度达到 90% 以上后，可点击“生成最终报告”。</p>
+          <p class="hint-text">报告将根据对话流程在你确认后自动生成。</p>
         </div>
-
-        <article v-if="reportData" class="report-panel">
-          <h2>健康报告结果</h2>
-          <p class="report-time">生成时间：{{ formatDateTime(reportData.generatedAt) }}</p>
-
-          <section>
-            <h3>1. 健康总结</h3>
-            <p>{{ reportData.summary }}</p>
-          </section>
-
-          <section>
-            <h3>2. 健康画像</h3>
-            <p>{{ reportData.healthPortrait.functionalStatus }}</p>
-            <p>优势：{{ reportData.healthPortrait.strengths.join('、') || '暂无' }}</p>
-            <p>问题：{{ reportData.healthPortrait.problems.join('、') || '暂无' }}</p>
-          </section>
-
-          <section>
-            <h3>3. 风险因素</h3>
-            <p class="report-label">短期风险（1-4周）</p>
-            <ul>
-              <li v-for="item in reportData.riskFactors.shortTerm" :key="`s-${item.name}`">
-                {{ item.name }}（{{ item.level }}）：{{ item.description }}
-              </li>
-            </ul>
-            <p class="report-label">中期风险（1-6月）</p>
-            <ul>
-              <li v-for="item in reportData.riskFactors.midTerm" :key="`m-${item.name}`">
-                {{ item.name }}（{{ item.level }}）：{{ item.description }}
-              </li>
-            </ul>
-          </section>
-
-          <section>
-            <h3>4. 行动建议</h3>
-            <p class="report-label">优先级 A</p>
-            <ul>
-              <li v-for="item in reportData.recommendations.priority1" :key="item.id">
-                {{ item.title }}：{{ item.description }}
-              </li>
-            </ul>
-            <p class="report-label">优先级 B</p>
-            <ul>
-              <li v-for="item in reportData.recommendations.priority2" :key="item.id">
-                {{ item.title }}：{{ item.description }}
-              </li>
-            </ul>
-            <p class="report-label">优先级 C</p>
-            <ul>
-              <li v-for="item in reportData.recommendations.priority3" :key="item.id">
-                {{ item.title }}：{{ item.description }}
-              </li>
-            </ul>
-          </section>
-        </article>
       </section>
     </div>
   </main>
