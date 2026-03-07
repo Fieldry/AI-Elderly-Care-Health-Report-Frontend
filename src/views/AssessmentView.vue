@@ -9,7 +9,8 @@ import {
   getSessionDetail,
   listSessions,
   sendChatMessage,
-  startChat
+  startChat,
+  deleteSession
 } from '@/api/chat'
 import { streamReport } from '@/api/report'
 import type { AgentStatusEvent, ChatMessage, ReportData, SessionMetadata } from '@/types'
@@ -119,6 +120,37 @@ function summarizeSession(meta: SessionMetadata) {
 
 async function refreshSessions() {
   sessions.value = await listSessions()
+}
+
+async function handleDeleteSession(sessionId: string, event: Event) {
+  event.stopPropagation() // 阻止触发选择会话
+  
+  if (!confirm('确定要删除这个会话吗？删除后无法恢复。')) {
+    return
+  }
+  
+  try {
+    await deleteSession(sessionId)
+    
+    // 如果删除的是当前会话，清空状态
+    if (sessionId === activeSessionId.value) {
+      activeSessionId.value = ''
+      messages.value = []
+      progress.value = 0
+      reportData.value = null
+    }
+    
+    // 刷新会话列表
+    await refreshSessions()
+    
+    // 如果还有会话，选择第一个
+    if (sessions.value.length > 0 && !activeSessionId.value) {
+      await selectSession(sessions.value[0].session_id)
+    }
+  } catch (error) {
+    console.error('删除会话失败:', error)
+    alert('删除会话失败，请重试')
+  }
 }
 
 function loadLatestReportFromSession(reports: Array<Record<string, unknown>>) {
@@ -344,12 +376,21 @@ onMounted(async () => {
             :class="{ active: session.session_id === activeSessionId }"
             @click="selectSession(session.session_id)"
           >
-            <p class="session-title">{{ summarizeSession(session) }}</p>
-            <p class="session-meta">{{ formatDateTime(session.created_at) }}</p>
-            <p class="session-tags">
-              <span v-if="session.has_report">已生成报告</span>
-              <span v-else>评估中</span>
-            </p>
+            <div class="session-content">
+              <p class="session-title">{{ summarizeSession(session) }}</p>
+              <p class="session-meta">{{ formatDateTime(session.created_at) }}</p>
+              <p class="session-tags">
+                <span v-if="session.has_report">已生成报告</span>
+                <span v-else>评估中</span>
+              </p>
+            </div>
+            <button 
+              class="delete-btn" 
+              @click="handleDeleteSession(session.session_id, $event)"
+              title="删除会话"
+            >
+              ×
+            </button>
           </button>
         </div>
       </aside>

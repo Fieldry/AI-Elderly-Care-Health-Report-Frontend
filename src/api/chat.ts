@@ -80,3 +80,7 @@ export async function getSessionDetail(sessionId: string): Promise<SessionDetail
   const { data } = await http.get<SessionDetail>(`/sessions/${sessionId}`)
   return data
 }
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  await http.delete(`/sessions/${sessionId}`)
+}
