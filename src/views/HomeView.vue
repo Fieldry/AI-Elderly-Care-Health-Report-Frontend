@@ -181,9 +181,10 @@ onUnmounted(() => {
     >
       <div class="portal-copy">
         <p class="section-eyebrow">{{ section.eyebrow }}</p>
-        <h2>
-          <RouterLink class="portal-title-link" :to="section.path">{{ section.title }}</RouterLink>
-        </h2>
+        <div class="portal-heading">
+          <h2>{{ section.title }}</h2>
+          <RouterLink class="primary-btn portal-entry-btn" :to="section.path">进入</RouterLink>
+        </div>
         <p>{{ section.description }}</p>
         <span class="status-pill">{{ section.status }}</span>
       </div>
@@ -209,7 +210,7 @@ onUnmounted(() => {
 
 <style scoped>
 .home-page {
-  padding: var(--nav-height) 0 90px;
+  padding: 24px 0 90px;
   position: relative;
 }
 
@@ -297,7 +298,6 @@ onUnmounted(() => {
   max-width: 10ch;
 }
 
-.portal-copy h2,
 .portal-copy h2 {
   font-size: clamp(34px, 4.6vw, 54px);
   max-width: 11ch;
@@ -305,6 +305,7 @@ onUnmounted(() => {
 
 .portal-copy h2 {
   max-width: none;
+  margin: 0;
 }
 
 .hero-description,
@@ -320,6 +321,14 @@ onUnmounted(() => {
 .portal-grid {
   display: grid;
   gap: 18px;
+}
+
+.portal-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 12px 0 16px;
 }
 
 .hero-aside {
@@ -427,12 +436,9 @@ onUnmounted(() => {
   align-self: flex-start;
 }
 
-.portal-title-link {
-  color: inherit;
-}
-
-.portal-title-link:hover {
-  color: var(--brand-strong);
+.portal-entry-btn {
+  min-width: 92px;
+  flex-shrink: 0;
 }
 
 .feature-card {
@@ -506,7 +512,7 @@ onUnmounted(() => {
 
 @media (max-width: 760px) {
   .home-page {
-    padding: calc(var(--nav-height) + 20px) 0 70px;
+    padding: 18px 0 70px;
   }
 
   .home-section {
@@ -526,6 +532,11 @@ onUnmounted(() => {
   .hero-description,
   .portal-copy p {
     font-size: 17px;
+  }
+
+  .portal-heading {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .pillar-list,

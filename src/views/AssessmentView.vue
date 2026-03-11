@@ -2,10 +2,8 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
-import ElderlySubnav from '@/components/ElderlySubnav.vue'
 import {
   getChatHistory,
-  getChatProfile,
   getChatProgress,
   getSessionDetail,
   listSessions,
@@ -13,8 +11,7 @@ import {
   startChat,
   deleteSession
 } from '@/api/chat'
-import { streamReport } from '@/api/report'
-import type { AgentStatusEvent, ChatMessage, ReportData, SessionMetadata } from '@/types'
+import type { ChatMessage, ReportData, SessionMetadata } from '@/types'
 
 const router = useRouter()
 
@@ -32,11 +29,7 @@ const progressState = ref('greeting')
 const completedGroups = ref<string[]>([])
 const pendingGroups = ref<string[]>([])
 
-const isGeneratingReport = ref(false)
-const reportEvents = ref<AgentStatusEvent[]>([])
 const reportData = ref<ReportData | null>(null)
-const reportStreamText = ref('')
-const reportError = ref('')
 
 const chatBodyRef = ref<HTMLElement | null>(null)
 const md = new MarkdownIt({
@@ -46,9 +39,6 @@ const md = new MarkdownIt({
 })
 
 const progressPercent = computed(() => Math.round(progress.value * 100))
-const canGenerateReport = computed(
-  () => !!activeSessionId.value && progress.value >= 0.9 && !isGeneratingReport.value
-)
 
 function sleep(ms: number) {
   return new Promise((resolve) => {
@@ -183,9 +173,6 @@ async function selectSession(sessionId: string) {
 
   loadingSession.value = true
   actionError.value = ''
-  reportError.value = ''
-  reportEvents.value = []
-  reportStreamText.value = ''
 
   try {
     activeSessionId.value = sessionId
@@ -208,9 +195,6 @@ async function selectSession(sessionId: string) {
 
 async function createNewSession() {
   actionError.value = ''
-  reportError.value = ''
-  reportEvents.value = []
-  reportStreamText.value = ''
   reportData.value = null
 
   try {
@@ -276,57 +260,8 @@ async function sendMessage() {
   }
 }
 
-async function generateReport() {
-  if (!canGenerateReport.value || !activeSessionId.value) {
-    return
-  }
-
-  isGeneratingReport.value = true
-  reportError.value = ''
-  reportEvents.value = []
-  reportStreamText.value = ''
-
-  try {
-    const profile = await getChatProfile(activeSessionId.value)
-
-    await streamReport(
-      {
-        sessionId: activeSessionId.value,
-        profile
-      },
-      {
-        onStatus(event) {
-          reportEvents.value.push(event)
-        },
-        onChunk(chunk) {
-          reportStreamText.value += chunk
-        },
-        onComplete(report) {
-          reportData.value = report
-          progressState.value = 'completed'
-          progress.value = Math.max(progress.value, 1)
-        },
-        onError(message) {
-          reportError.value = message
-        }
-      }
-    )
-
-    await refreshSessions()
-  } catch (error) {
-    reportError.value = (error as Error).message
-  } finally {
-    isGeneratingReport.value = false
-  }
-}
-
 watch(
-  () => [
-    messages.value.length,
-    reportEvents.value.length,
-    reportStreamText.value.length,
-    reportData.value?.generatedAt
-  ],
+  () => [messages.value.length, reportData.value?.generatedAt],
   async () => {
     await nextTick()
     if (chatBodyRef.value) {
@@ -351,35 +286,45 @@ onMounted(async () => {
 
 <template>
   <main class="role-page assessment-page">
-    <section class="assessment-hero">
-      <div class="assessment-copy">
-        <p class="section-eyebrow">老年人入口 / 健康评估</p>
-        <h1>通过更清晰的对话流程生成老人健康报告</h1>
-        <p>
-          该页面沿用现有健康评估能力，并放入新的老人端结构中。整个页面保持更大的字号、更高对比度和更明确的操作按钮，便于老人及陪伴者共同使用。
-        </p>
-      </div>
-
-      <div class="hero-actions">
-        <button class="ghost-btn" type="button" @click="router.push('/elderly')">返回老年人入口</button>
-        <button
-          class="primary-btn"
-          type="button"
-          :disabled="isSending || isGeneratingReport"
-          @click="createNewSession"
-        >
-          新建评估
-        </button>
-      </div>
-    </section>
-
-    <ElderlySubnav />
-
     <section class="assessment-layout">
+      <section class="progress-card surface-card">
+        <div class="progress-head">
+          <div>
+            <p class="progress-title">信息收集进度</p>
+            <p class="progress-state">{{ progressPercent }}% · {{ stateLabel(progressState) }}</p>
+          </div>
+
+          <div class="progress-actions">
+            <button class="ghost-btn" type="button" @click="router.push('/elderly')">返回老年人入口</button>
+            <button
+              class="primary-btn"
+              type="button"
+              :disabled="isSending"
+              @click="createNewSession"
+            >
+              新建评估
+            </button>
+          </div>
+        </div>
+
+        <div class="progress-track">
+          <div class="progress-bar" :style="{ width: `${progressPercent}%` }" />
+        </div>
+
+        <div class="progress-groups">
+          <div class="group-card">
+            <strong>已完成</strong>
+            <div class="tag-list">
+              <span v-for="group in completedGroups" :key="group">{{ group }}</span>
+              <span v-if="!completedGroups.length">暂无</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <aside class="history-sidebar surface-card">
         <div class="history-topbar">
           <div>
-            <p class="section-eyebrow">会话管理</p>
             <h2>历史会话</h2>
           </div>
           <button class="ghost-btn" type="button" @click="refreshSessions">刷新</button>
@@ -419,45 +364,6 @@ onMounted(async () => {
       </aside>
 
       <section class="chat-section surface-card">
-        <div class="progress-card">
-          <div class="progress-head">
-            <div>
-              <p class="progress-title">信息收集进度</p>
-              <p class="progress-state">{{ progressPercent }}% · {{ stateLabel(progressState) }}</p>
-            </div>
-            <button
-              class="secondary-btn"
-              type="button"
-              :disabled="!canGenerateReport"
-              @click="generateReport"
-            >
-              {{ isGeneratingReport ? '生成中...' : '生成报告' }}
-            </button>
-          </div>
-
-          <div class="progress-track">
-            <div class="progress-bar" :style="{ width: `${progressPercent}%` }" />
-          </div>
-
-          <div class="progress-groups">
-            <div class="group-card">
-              <strong>已完成</strong>
-              <div class="tag-list">
-                <span v-for="group in completedGroups" :key="group">{{ group }}</span>
-                <span v-if="!completedGroups.length">暂无</span>
-              </div>
-            </div>
-
-            <div class="group-card">
-              <strong>待补充</strong>
-              <div class="tag-list">
-                <span v-for="group in pendingGroups" :key="group">{{ group }}</span>
-                <span v-if="!pendingGroups.length">暂无</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <div ref="chatBodyRef" class="chat-body">
           <div
             v-for="(message, idx) in messages"
@@ -475,21 +381,7 @@ onMounted(async () => {
           </div>
 
           <div v-if="loadingSession" class="hint-text">会话加载中...</div>
-
-          <div v-if="reportEvents.length" class="report-events">
-            <h3>报告生成状态</h3>
-            <p v-for="(event, idx) in reportEvents" :key="`event-${idx}`">
-              [{{ event.agent }}] {{ event.status }} {{ event.message || '' }}
-            </p>
-          </div>
-
-          <div v-if="reportError" class="error-text">{{ reportError }}</div>
           <div v-if="actionError" class="error-text">{{ actionError }}</div>
-
-          <div v-if="reportStreamText" class="message-row assistant">
-            <p class="message-role">报告流</p>
-            <div class="message-bubble markdown-body" v-html="renderMarkdown(reportStreamText)"></div>
-          </div>
 
           <article v-if="reportData" class="report-panel">
             <h2>健康报告结果</h2>
@@ -551,7 +443,7 @@ onMounted(async () => {
           <textarea
             v-model="inputText"
             placeholder="请输入老人健康情况，例如：80岁女性，近一年行动不便，需要协助洗澡。"
-            :disabled="isSending || isGeneratingReport"
+            :disabled="isSending"
             @keydown.enter.exact.prevent="sendMessage"
           />
 
@@ -561,7 +453,7 @@ onMounted(async () => {
             </button>
           </div>
 
-          <p class="hint-text">完成足够信息后，可在上方点击“生成报告”。</p>
+          <p class="hint-text">信息收集完成后，在对话里回复“确认”即可开始生成报告。</p>
         </div>
       </section>
     </section>
@@ -570,65 +462,37 @@ onMounted(async () => {
 
 <style scoped>
 .assessment-page {
-  display: grid;
-  gap: 24px;
-}
-
-.assessment-hero {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 22px;
-  padding: 32px 34px;
-  border-radius: 34px;
-  border: 1px solid rgba(12, 112, 109, 0.16);
-  background: linear-gradient(135deg, rgba(223, 240, 235, 0.9), rgba(248, 252, 251, 0.96));
-  box-shadow: var(--shadow-soft);
-}
-
-.assessment-copy h1 {
-  margin: 10px 0 14px;
-  color: var(--ink-strong);
-  font-size: clamp(34px, 4.8vw, 54px);
-  line-height: 1.08;
-}
-
-.assessment-copy p:last-child {
-  margin: 0;
-  max-width: 58ch;
-  color: var(--ink-muted);
-  font-size: 19px;
-  line-height: 1.8;
-}
-
-.hero-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.hero-actions :deep(.ghost-btn),
-.hero-actions :deep(.primary-btn) {
-  min-width: 156px;
-  min-height: 54px;
-  font-size: 18px;
+  min-height: auto;
+  display: block;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-top: 24px;
+  padding-bottom: 24px;
 }
 
 .assessment-layout {
-  min-height: 74vh;
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
+  grid-template-rows: auto minmax(780px, 100dvh);
   gap: 18px;
+  align-items: start;
+}
+
+.progress-card {
+  grid-column: 1 / -1;
+  padding: 22px 24px 18px;
 }
 
 .history-sidebar,
 .chat-section {
+  height: 100%;
   min-height: 0;
   overflow: hidden;
   border-radius: 28px;
 }
 
 .history-sidebar {
+  align-self: start;
   padding: 22px;
   display: flex;
   flex-direction: column;
@@ -732,12 +596,8 @@ onMounted(async () => {
 
 .chat-section {
   display: grid;
-  grid-template-rows: auto 1fr auto;
-}
-
-.progress-card {
-  padding: 22px 24px 18px;
-  border-bottom: 1px solid var(--line);
+  grid-template-rows: 1fr auto;
+  height: 100%;
 }
 
 .progress-head {
@@ -745,6 +605,20 @@ onMounted(async () => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+}
+
+.progress-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.progress-actions :deep(.ghost-btn),
+.progress-actions :deep(.primary-btn) {
+  min-height: 50px;
+  min-width: 144px;
+  font-size: 17px;
 }
 
 .progress-title,
@@ -783,7 +657,7 @@ onMounted(async () => {
 .progress-groups {
   margin-top: 18px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 12px;
 }
 
@@ -998,19 +872,15 @@ onMounted(async () => {
 @media (max-width: 1080px) {
   .assessment-layout {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(320px, 38dvh) minmax(780px, 100dvh);
   }
 
   .history-sidebar {
-    max-height: 320px;
+    align-self: start;
   }
 }
 
 @media (max-width: 800px) {
-  .assessment-hero {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
   .progress-head,
   .progress-groups {
     grid-template-columns: 1fr;
@@ -1019,19 +889,19 @@ onMounted(async () => {
   .progress-head {
     flex-direction: column;
   }
+
+  .progress-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 640px) {
-  .assessment-hero {
-    padding: 24px;
-    border-radius: 28px;
+  .assessment-page {
+    padding-top: 18px;
+    padding-bottom: 16px;
   }
 
-  .assessment-copy h1 {
-    font-size: clamp(30px, 10vw, 40px);
-  }
-
-  .assessment-copy p:last-child,
   .message-bubble,
   .chat-actions textarea,
   .report-panel p,

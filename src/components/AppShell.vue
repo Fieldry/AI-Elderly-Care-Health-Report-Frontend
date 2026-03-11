@@ -164,17 +164,15 @@ watch(
 }
 
 .app-header {
-  position: fixed;
-  top: 14px;
-  left: 0;
-  right: 0;
-  z-index: 30;
-  padding: 0 18px;
+  position: relative;
+  z-index: 10;
+  padding: 14px 18px 0;
 }
 
 .app-header__inner {
   width: min(1220px, calc(100vw - 24px));
   margin: 0 auto;
+  position: relative;
   min-height: var(--nav-height);
   padding: 14px 18px;
   display: grid;
@@ -315,8 +313,7 @@ watch(
 
 @media (max-width: 640px) {
   .app-header {
-    top: 10px;
-    padding: 0 10px;
+    padding: 10px 10px 0;
   }
 
   .app-header__inner {

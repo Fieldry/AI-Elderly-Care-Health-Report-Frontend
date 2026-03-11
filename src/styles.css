@@ -108,7 +108,7 @@ img {
 }
 
 .role-page {
-  padding: calc(var(--nav-height) + 48px) 0 88px;
+  padding: 28px 0 88px;
 }
 
 .section-eyebrow {
@@ -189,7 +189,7 @@ img {
 }
 
 .page-anchor {
-  scroll-margin-top: calc(var(--nav-height) + 44px);
+  scroll-margin-top: 24px;
 }
 
 input:focus-visible,
@@ -206,6 +206,6 @@ a:focus-visible {
   }
 
   .role-page {
-    padding: calc(var(--nav-height) + 40px) 0 72px;
+    padding: 20px 0 72px;
   }
 }

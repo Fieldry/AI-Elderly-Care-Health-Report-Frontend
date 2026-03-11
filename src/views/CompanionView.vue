@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import ElderlySubnav from '@/components/ElderlySubnav.vue'
 import PlaceholderPanel from '@/components/PlaceholderPanel.vue'
 
 const upcomingFeatures = [
@@ -26,8 +25,6 @@ const scenarioCards = [
         </p>
       </div>
     </section>
-
-    <ElderlySubnav />
 
     <PlaceholderPanel
       status="功能预留中"
