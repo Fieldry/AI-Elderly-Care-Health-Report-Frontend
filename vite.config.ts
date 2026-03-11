@@ -3,6 +3,8 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
+const proxyTarget = 'http://127.0.0.1:8001'
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
@@ -17,15 +19,15 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: proxyTarget,
         changeOrigin: true
       },
       '/chat': {
-        target: 'http://localhost:8000',
+        target: proxyTarget,
         changeOrigin: true
       },
       '/report': {
-        target: 'http://localhost:8000',
+        target: proxyTarget,
         changeOrigin: true
       }
     }
