@@ -3,7 +3,7 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
-const proxyTarget = 'http://127.0.0.1:8001'
+const proxyTarget = process.env.VITE_DEV_PROXY_TARGET || 'http://127.0.0.1:8001'
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -29,6 +29,11 @@ export default defineConfig({
       '/report': {
         target: proxyTarget,
         changeOrigin: true
+      },
+      '/ws': {
+        target: proxyTarget,
+        changeOrigin: true,
+        ws: true
       }
     }
   },

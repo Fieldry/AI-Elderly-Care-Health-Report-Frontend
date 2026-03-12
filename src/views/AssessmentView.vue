@@ -2,6 +2,8 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
+import { useGoogleStreamingSpeech } from '@/composables/useGoogleStreamingSpeech'
+import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
 import {
   getChatHistory,
   getChatProgress,
@@ -39,6 +41,88 @@ const md = new MarkdownIt({
 })
 
 const progressPercent = computed(() => Math.round(progress.value * 100))
+const voiceMode = ref<'google' | 'browser' | null>(null)
+const {
+  isSupported: isGoogleVoiceSupported,
+  isConnecting: isGoogleVoiceConnecting,
+  isListening: isGoogleVoiceListening,
+  errorMessage: googleVoiceErrorMessage,
+  interimTranscript: googleInterimTranscript,
+  speechEvent: googleSpeechEvent,
+  start: startGoogleVoiceRecognition,
+  stop: stopGoogleVoiceRecognition,
+  abort: abortGoogleVoiceRecognition
+} = useGoogleStreamingSpeech({
+  lang: 'cmn-Hans-CN',
+  onTranscript(value) {
+    inputText.value = value
+  }
+})
+
+const {
+  isListening: isBrowserVoiceListening,
+  isSupported: isBrowserVoiceSupported,
+  errorMessage: browserVoiceErrorMessage,
+  start: startBrowserVoiceRecognition,
+  stop: stopBrowserVoiceRecognition,
+  abort: abortBrowserVoiceRecognition
+} = useSpeechRecognition({
+  lang: 'zh-CN',
+  onTranscript(value) {
+    inputText.value = value
+  }
+})
+
+const isVoiceSupported = computed(() => isGoogleVoiceSupported.value || isBrowserVoiceSupported.value)
+const isVoiceConnecting = computed(() => isGoogleVoiceConnecting.value)
+const isVoiceActive = computed(
+  () => isGoogleVoiceConnecting.value || isGoogleVoiceListening.value || isBrowserVoiceListening.value
+)
+const voiceButtonLabel = computed(() => {
+  if (isVoiceConnecting.value) {
+    return '连接语音服务...'
+  }
+
+  return isVoiceActive.value ? '停止语音输入' : '语音输入'
+})
+const voiceErrorMessage = computed(() => {
+  if (voiceMode.value === 'browser') {
+    return browserVoiceErrorMessage.value || ''
+  }
+
+  return googleVoiceErrorMessage.value || browserVoiceErrorMessage.value || ''
+})
+const voiceHintText = computed(() => {
+  if (isGoogleVoiceConnecting.value) {
+    return '正在连接 Google 实时语音转写服务，请稍候。'
+  }
+
+  if (voiceMode.value === 'google' && (isGoogleVoiceListening.value || isGoogleVoiceConnecting.value)) {
+    if (googleSpeechEvent.value === 'end') {
+      return '已检测到停顿，正在整理最后一段识别结果。'
+    }
+
+    if (googleSpeechEvent.value === 'begin' || googleInterimTranscript.value) {
+      return '正在实时转写，请继续说话；再次点击可手动停止。'
+    }
+
+    return '正在使用 Google 实时转写，请直接说话；再次点击可手动停止。'
+  }
+
+  if (voiceMode.value === 'browser' && isBrowserVoiceListening.value) {
+    return 'Google 实时转写不可用，当前使用浏览器语音识别作为备用方案。'
+  }
+
+  if (isGoogleVoiceSupported.value) {
+    return '点击“语音输入”开始说话。'
+  }
+
+  if (isBrowserVoiceSupported.value) {
+    return '当前环境无法启用 Google 实时转写，将使用浏览器语音识别作为备用方案。'
+  }
+
+  return '当前浏览器暂不支持语音输入，请检查麦克风权限和浏览器设置。'
+})
 
 function sleep(ms: number) {
   return new Promise((resolve) => {
@@ -171,6 +255,7 @@ async function selectSession(sessionId: string) {
     return
   }
 
+  abortVoiceInput()
   loadingSession.value = true
   actionError.value = ''
 
@@ -194,6 +279,7 @@ async function selectSession(sessionId: string) {
 }
 
 async function createNewSession() {
+  abortVoiceInput()
   actionError.value = ''
   reportData.value = null
 
@@ -229,6 +315,8 @@ async function sendMessage() {
     return
   }
 
+  abortVoiceInput()
+
   await ensureActiveSession()
   if (!activeSessionId.value) {
     return
@@ -257,6 +345,58 @@ async function sendMessage() {
     actionError.value = (error as Error).message
   } finally {
     isSending.value = false
+  }
+}
+
+function stopVoiceInput() {
+  if (voiceMode.value === 'google') {
+    if (isGoogleVoiceConnecting.value) {
+      abortGoogleVoiceRecognition()
+    } else {
+      stopGoogleVoiceRecognition()
+    }
+  }
+
+  if (voiceMode.value === 'browser' && isBrowserVoiceListening.value) {
+    stopBrowserVoiceRecognition()
+  }
+
+  voiceMode.value = null
+}
+
+function abortVoiceInput() {
+  abortGoogleVoiceRecognition()
+  abortBrowserVoiceRecognition()
+  voiceMode.value = null
+}
+
+async function toggleVoiceRecognition() {
+  if (isVoiceActive.value) {
+    stopVoiceInput()
+    return
+  }
+
+  await ensureActiveSession()
+  if (!activeSessionId.value) {
+    return
+  }
+
+  voiceMode.value = null
+
+  if (isGoogleVoiceSupported.value) {
+    try {
+      voiceMode.value = 'google'
+      await startGoogleVoiceRecognition(activeSessionId.value, inputText.value)
+      return
+    } catch (error) {
+      console.warn('Google 实时转写启动失败，尝试回退到浏览器语音识别:', error)
+      voiceMode.value = null
+    }
+  }
+
+  if (isBrowserVoiceSupported.value) {
+    voiceMode.value = 'browser'
+    startBrowserVoiceRecognition(inputText.value)
   }
 }
 
@@ -443,17 +583,27 @@ onMounted(async () => {
           <textarea
             v-model="inputText"
             placeholder="请输入老人健康情况，例如：80岁女性，近一年行动不便，需要协助洗澡。"
-            :disabled="isSending"
+            :disabled="isSending || isVoiceActive"
             @keydown.enter.exact.prevent="sendMessage"
           />
 
           <div class="action-row">
+            <button
+              class="secondary-btn voice-btn"
+              type="button"
+              :disabled="isSending || !isVoiceSupported"
+              @click="toggleVoiceRecognition"
+            >
+              {{ voiceButtonLabel }}
+            </button>
             <button class="primary-btn" type="button" :disabled="isSending || !inputText.trim()" @click="sendMessage">
               {{ isSending ? '发送中...' : '发送' }}
             </button>
           </div>
 
+          <p class="hint-text">{{ voiceHintText }}</p>
           <p class="hint-text">信息收集完成后，在对话里回复“确认”即可开始生成报告。</p>
+          <p v-if="voiceErrorMessage" class="error-text">{{ voiceErrorMessage }}</p>
         </div>
       </section>
     </section>
@@ -831,10 +981,21 @@ onMounted(async () => {
 .action-row {
   margin-top: 14px;
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
 }
 
+.voice-btn {
+  min-width: 164px;
+}
+
 .action-row :deep(.primary-btn) {
+  min-height: 56px;
+  padding-inline: 24px;
+  font-size: 18px;
+}
+
+.action-row :deep(.secondary-btn) {
   min-height: 56px;
   padding-inline: 24px;
   font-size: 18px;

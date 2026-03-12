@@ -210,7 +210,7 @@ onUnmounted(() => {
 
 <style scoped>
 .home-page {
-  padding: 24px 0 90px;
+  padding: 0 0 90px;
   position: relative;
 }
 
