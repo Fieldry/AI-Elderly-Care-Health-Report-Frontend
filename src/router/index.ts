@@ -22,6 +22,11 @@ const router = createRouter({
   },
   routes: [
     {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/LoginView.vue')
+    },
+    {
       path: '/',
       name: 'home',
       component: () => import('@/views/HomeView.vue')
@@ -45,6 +50,31 @@ const router = createRouter({
       path: '/family',
       name: 'family',
       component: () => import('@/views/FamilyPortalView.vue')
+    },
+    {
+      path: '/family/hub',
+      name: 'family-hub',
+      component: () => import('@/views/FamilyHubView.vue')
+    },
+    {
+      path: '/family/supplement/:elderly_id',
+      name: 'family-supplement',
+      component: () => import('@/views/FamilySupplementView.vue')
+    },
+    {
+      path: '/family/chat/:elderly_id',
+      name: 'family-chat',
+      component: () => import('@/views/FamilyChatView.vue')
+    },
+    {
+      path: '/family/edit/:elderly_id',
+      name: 'family-edit',
+      component: () => import('@/views/FamilyEditView.vue')
+    },
+    {
+      path: '/family/reports/:elderly_id',
+      name: 'family-reports',
+      component: () => import('@/views/FamilyReportsView.vue')
     },
     {
       path: '/doctor',

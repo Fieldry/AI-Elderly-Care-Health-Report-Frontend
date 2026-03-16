@@ -44,7 +44,7 @@ const previewCards = [
     >
       <template #actions>
         <RouterLink class="primary-btn" to="/">返回首页</RouterLink>
-        <RouterLink class="ghost-btn" to="/elderly/assessment">查看已开放功能</RouterLink>
+        <RouterLink class="ghost-btn" to="/family/hub">进入家属中心</RouterLink>
       </template>
 
       <div class="preview-grid">

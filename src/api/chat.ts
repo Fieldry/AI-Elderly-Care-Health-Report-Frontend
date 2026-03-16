@@ -72,15 +72,15 @@ export async function getChatHistory(sessionId: string): Promise<ChatMessage[]> 
 }
 
 export async function listSessions(): Promise<SessionMetadata[]> {
-  const { data } = await http.get<{ sessions: SessionMetadata[] }>('/sessions')
+  const { data } = await http.get<{ sessions: SessionMetadata[] }>('/api/sessions')
   return data.sessions || []
 }
 
 export async function getSessionDetail(sessionId: string): Promise<SessionDetail> {
-  const { data } = await http.get<SessionDetail>(`/sessions/${sessionId}`)
+  const { data } = await http.get<SessionDetail>(`/api/sessions/${sessionId}`)
   return data
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
-  await http.delete(`/sessions/${sessionId}`)
+  await http.delete(`/api/sessions/${sessionId}`)
 }
