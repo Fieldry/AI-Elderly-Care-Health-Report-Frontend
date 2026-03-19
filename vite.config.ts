@@ -5,11 +5,8 @@ import vue from '@vitejs/plugin-vue'
 
 const proxyTarget = process.env.VITE_DEV_PROXY_TARGET || 'http://127.0.0.1:8001'
 
-// https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [
-    vue(),
-  ],
+  plugins: [vue()],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
@@ -22,11 +19,15 @@ export default defineConfig({
         target: proxyTarget,
         changeOrigin: true
       },
+      '/auth': {
+        target: proxyTarget,
+        changeOrigin: true
+      },
       '/chat': {
         target: proxyTarget,
         changeOrigin: true
       },
-      '/report': {
+      '/family': {
         target: proxyTarget,
         changeOrigin: true
       },
@@ -34,13 +35,6 @@ export default defineConfig({
         target: proxyTarget,
         changeOrigin: true,
         ws: true
-      }
-    }
-  },
-  css: {
-    preprocessorOptions: {
-      scss: {
-        api: 'modern-compiler'
       }
     }
   }

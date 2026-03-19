@@ -1,19 +1,16 @@
-export interface SessionMetadata {
-  session_id: string
-  user_id?: string
-  created_at: string
-  status?: string
-  title?: string
-  has_report?: boolean
-  has_profile?: boolean
-  files?: string[]
+export type Role = 'elderly' | 'family' | 'doctor'
+
+export interface AuthResponse {
+  token: string
+  user_name: string
+  role?: string
 }
 
-export interface SessionDetail {
-  metadata: SessionMetadata
-  conversation: ChatMessage[] | null
-  profile: Record<string, unknown> | null
-  reports: Array<Record<string, unknown>>
+export interface AuthSession {
+  token: string
+  userName: string
+  role: Role
+  backendRole?: string
 }
 
 export interface ChatStartResponse {
@@ -35,50 +32,37 @@ export interface ChatMessageResponse {
   completed: boolean
 }
 
-export interface ChatProgressResponse {
-  state: string
-  progress: number
-  completedGroups: string[]
-  pendingGroups: string[]
-  missingFields: Record<string, string[]>
+export interface SessionMetadata {
+  session_id: string
+  user_id?: string
+  created_at: string
+  status?: string
+  title?: string
+  has_report?: boolean
+  has_profile?: boolean
+  files?: string[]
 }
 
-export interface AgentStatusEvent {
-  agent: string
-  status: string
-  message?: string
+export interface SessionDetail {
+  metadata: SessionMetadata
+  conversation: ChatMessage[] | null
+  profile: Record<string, unknown> | null
+  reports: Array<Record<string, unknown>>
 }
 
-export interface RiskItem {
+export interface FamilyElderlySummary {
+  elderly_id: string
   name: string
-  level: string
-  description: string
-  timeframe: string
+  relation: string
+  completion_rate: number
+  created_at: string
 }
 
-export interface RecommendationItem {
-  id: string
-  title: string
-  description: string
-  category: string
-  completed: boolean
+export interface FamilyElderlyDetail {
+  elderly_id: string
+  profile: Record<string, unknown>
 }
 
-export interface ReportData {
-  summary: string
-  healthPortrait: {
-    functionalStatus: string
-    strengths: string[]
-    problems: string[]
-  }
-  riskFactors: {
-    shortTerm: RiskItem[]
-    midTerm: RiskItem[]
-  }
-  recommendations: {
-    priority1: RecommendationItem[]
-    priority2: RecommendationItem[]
-    priority3: RecommendationItem[]
-  }
-  generatedAt: string
+export interface FamilyReportsResponse {
+  data: Array<Record<string, unknown>>
 }

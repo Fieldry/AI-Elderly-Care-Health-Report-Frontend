@@ -1,5 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+import { getStoredSession, roleHomePath } from '@/session'
+import type { Role } from '@/types'
+
 const router = createRouter({
   history: createWebHistory(),
   scrollBehavior(to, from, savedPosition) {
@@ -14,7 +17,7 @@ const router = createRouter({
       }
     }
 
-    if (to.path !== from.path) {
+    if (to.fullPath !== from.fullPath) {
       return { top: 0 }
     }
 
@@ -22,70 +25,79 @@ const router = createRouter({
   },
   routes: [
     {
-      path: '/login',
-      name: 'login',
-      component: () => import('@/views/LoginView.vue')
-    },
-    {
       path: '/',
       name: 'home',
       component: () => import('@/views/HomeView.vue')
     },
     {
-      path: '/elderly',
-      name: 'elderly',
-      component: () => import('@/views/ElderlyHubView.vue')
+      path: '/access/:role(elderly|family|doctor)',
+      name: 'access',
+      component: () => import('@/views/AccessView.vue'),
+      props: true
     },
     {
       path: '/elderly/assessment',
       name: 'elderly-assessment',
-      component: () => import('@/views/AssessmentView.vue')
-    },
-    {
-      path: '/elderly/companion',
-      name: 'elderly-companion',
-      component: () => import('@/views/CompanionView.vue')
-    },
-    {
-      path: '/family',
-      name: 'family',
-      component: () => import('@/views/FamilyPortalView.vue')
+      component: () => import('@/views/ElderlyAssessmentView.vue')
     },
     {
       path: '/family/hub',
       name: 'family-hub',
-      component: () => import('@/views/FamilyHubView.vue')
+      component: () => import('@/views/FamilyHubView.vue'),
+      meta: {
+        requiresAuth: true,
+        roles: ['family']
+      }
     },
     {
-      path: '/family/supplement/:elderly_id',
-      name: 'family-supplement',
-      component: () => import('@/views/FamilySupplementView.vue')
+      path: '/family/elderly/:elderlyId',
+      name: 'family-elderly-detail',
+      component: () => import('@/views/FamilyDetailView.vue'),
+      props: true,
+      meta: {
+        requiresAuth: true,
+        roles: ['family']
+      }
     },
     {
-      path: '/family/chat/:elderly_id',
-      name: 'family-chat',
-      component: () => import('@/views/FamilyChatView.vue')
-    },
-    {
-      path: '/family/edit/:elderly_id',
-      name: 'family-edit',
-      component: () => import('@/views/FamilyEditView.vue')
-    },
-    {
-      path: '/family/reports/:elderly_id',
-      name: 'family-reports',
-      component: () => import('@/views/FamilyReportsView.vue')
-    },
-    {
-      path: '/doctor',
-      name: 'doctor',
-      component: () => import('@/views/DoctorPortalView.vue')
+      path: '/doctor/hub',
+      name: 'doctor-hub',
+      component: () => import('@/views/DoctorHubView.vue'),
+      meta: {
+        requiresAuth: true,
+        roles: ['doctor']
+      }
     },
     {
       path: '/:pathMatch(.*)*',
       redirect: '/'
     }
   ]
+})
+
+router.beforeEach((to) => {
+  if (!to.meta.requiresAuth) {
+    return true
+  }
+
+  const session = getStoredSession()
+  const requiredRoles = (to.meta.roles || []) as Role[]
+
+  if (!session) {
+    const targetRole = requiredRoles[0] || 'family'
+    return {
+      name: 'access',
+      params: {
+        role: targetRole
+      }
+    }
+  }
+
+  if (requiredRoles.length > 0 && !requiredRoles.includes(session.role)) {
+    return roleHomePath(session.role)
+  }
+
+  return true
 })
 
 export default router
