@@ -186,7 +186,8 @@ a:focus-visible {
 .app-actions__ghost,
 .session-pill,
 .primary-button,
-.secondary-button {
+.secondary-button,
+.ghost-button {
   min-height: 46px;
   padding: 0 18px;
   border-radius: 999px;
@@ -208,7 +209,8 @@ a:focus-visible {
 .app-nav__link:hover,
 .app-actions__ghost:hover,
 .primary-button:hover,
-.secondary-button:hover {
+.secondary-button:hover,
+.ghost-button:hover {
   transform: translateY(-1px);
 }
 
@@ -231,6 +233,12 @@ a:focus-visible {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.88);
   color: var(--ink-strong);
+}
+
+.ghost-button {
+  border: 1px solid rgba(120, 164, 199, 0.2);
+  background: rgba(244, 249, 255, 0.74);
+  color: var(--ink);
 }
 
 .session-pill {

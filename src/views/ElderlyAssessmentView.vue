@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { getChatHistory, getChatProfile, getSessionDetail, sendChatMessage, startChat } from '@/api/chat'
 import ProfileOverview from '@/components/ProfileOverview.vue'
@@ -11,6 +12,7 @@ import { estimateProfileCompletion, getMissingCoreFields } from '@/utils/profile
 import { mergeProfileSnapshots } from '@/utils/report'
 
 const STORAGE_KEY = 'ai-elderly-care.current-session'
+const router = useRouter()
 
 const sessionId = ref('')
 const messages = ref<ChatMessage[]>([])
@@ -358,7 +360,7 @@ onMounted(async () => {
 
       <aside class="side-panel">
         <section class="surface-card summary-card">
-          <p class="eyebrow">老人端</p>
+          <p class="eyebrow">长者端</p>
           <h1>健康评估对话</h1>
           <p class="summary-card__text">
             用对话和语音逐步采集老人健康信息，右侧同步查看状态、结构化画像和当前可用报告。
@@ -377,6 +379,9 @@ onMounted(async () => {
 
           <button class="secondary-button summary-card__action" type="button" @click="createNewSession">
             开始新评估
+          </button>
+          <button class="ghost-button summary-card__action" type="button" @click="router.push('/access/elderly')">
+            返回长者首页
           </button>
         </section>
 

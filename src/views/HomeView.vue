@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { nextTick, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+
 interface RolePanel {
   id: string
   eyebrow: string
@@ -9,16 +12,19 @@ interface RolePanel {
   actionLabel: string
 }
 
+const route = useRoute()
+const landingPageRef = ref<HTMLElement | null>(null)
+
 const rolePanels: RolePanel[] = [
   {
     id: 'elderly',
-    eyebrow: '老人端',
+    eyebrow: '长者端',
     title: '用对话和语音，轻负担采集老年人健康画像',
     description:
       '大字号界面承接老人使用场景，通过自然对话采集基础健康、功能状态与生活习惯信息，并在可用时展示最新健康评估结果。',
     features: ['超大字号聊天区', '语音输入优先', '报告与画像同步查看'],
     actionPath: '/access/elderly',
-    actionLabel: '进入老人端'
+    actionLabel: '进入长者端'
   },
   {
     id: 'family',
@@ -49,27 +55,57 @@ const overviewCards = [
   },
   {
     title: '多方协同',
-    text: '老人端采集，家属端补全，医生端查看，全流程围绕同一份健康画像展开。'
+    text: '长者端采集，家属端补全，医生端查看，全流程围绕同一份健康画像展开。'
   },
   {
     title: '医疗冷静感',
     text: '整体视觉采用淡蓝色冷色调与留白布局，突出可信、清晰、低压力。'
   }
 ]
+
+async function scrollToHash(hash: string) {
+  if (!hash) {
+    landingPageRef.value?.scrollTo({
+      top: 0,
+      behavior: 'smooth'
+    })
+    return
+  }
+
+  await nextTick()
+  const target = document.querySelector(hash)
+  if (target instanceof HTMLElement) {
+    target.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start'
+    })
+  }
+}
+
+watch(
+  () => route.hash,
+  async (hash) => {
+    await scrollToHash(hash)
+  }
+)
+
+onMounted(async () => {
+  await scrollToHash(route.hash)
+})
 </script>
 
 <template>
-  <div class="landing-page">
+  <div ref="landingPageRef" class="landing-page">
     <section id="overview" class="landing-section landing-section--overview">
       <div class="landing-section__content">
         <div class="landing-hero">
           <p class="eyebrow">AI Elderly Care</p>
           <h1>面向老年人的大模型健康对话系统</h1>
           <p class="hero-text">
-            平台以老人端采集为起点，联动家属端和医生端查看同一份健康画像，逐步形成适合长期健康管理的评估闭环。
+            平台以长者端采集为起点，联动家属端和医生端查看同一份健康画像，逐步形成适合长期健康管理的评估闭环。
           </p>
           <div class="hero-actions">
-            <RouterLink class="primary-button" to="/access/elderly">开始老人评估</RouterLink>
+            <RouterLink class="primary-button" to="/access/elderly">开始长者评估</RouterLink>
             <RouterLink class="secondary-button" to="/access/family">家属登录</RouterLink>
           </div>
         </div>

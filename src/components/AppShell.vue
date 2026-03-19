@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 
 import { clearStoredSession, roleHomePath, useAuthSession } from '@/session'
@@ -18,7 +18,7 @@ const { session } = useAuthSession()
 
 const navItems: NavItem[] = [
   { label: '总览', hash: '#overview' },
-  { label: '老人端', hash: '#elderly' },
+  { label: '长者端', hash: '#elderly' },
   { label: '家属端', hash: '#family' },
   { label: '医生端', hash: '#doctor' }
 ]
@@ -42,7 +42,7 @@ const currentRoleLabel = computed(() => {
   }
 
   const map: Record<Role, string> = {
-    elderly: '老人端',
+    elderly: '长者端',
     family: '家属端',
     doctor: '医生端'
   }
@@ -60,6 +60,22 @@ function isActive(item: NavItem) {
 
 async function navigate(item: NavItem) {
   if (item.hash) {
+    if (route.path === '/') {
+      if (route.hash !== item.hash) {
+        await router.push({
+          path: '/',
+          hash: item.hash
+        })
+      }
+
+      await nextTick()
+      document.querySelector(item.hash)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start'
+      })
+      return
+    }
+
     await router.push({
       path: '/',
       hash: item.hash
@@ -88,7 +104,7 @@ async function handleLogout() {
           <span class="brand-button__badge">AI</span>
           <span class="brand-button__copy">
             <strong>智养健康评估平台</strong>
-            <small>老人采集、家属协同、医生研判</small>
+            <small>长者采集、家属协同、医生研判</small>
           </span>
         </button>
 

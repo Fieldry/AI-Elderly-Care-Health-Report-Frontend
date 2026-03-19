@@ -15,7 +15,7 @@ const router = useRouter()
 const roleContent = computed(() => {
   if (props.role === 'elderly') {
     return {
-      title: '老人端入口',
+      title: '长者端入口',
       description: '通过大字号对话界面与语音输入采集健康信息，并查看当前可用的画像和评估结果。',
       bullets: ['适老化大字号阅读', '支持语音输入', '对话过程低干扰']
     }
@@ -106,9 +106,9 @@ async function handleContinue() {
       </template>
 
       <template v-else>
-        <h2>开始健康评估</h2>
+        <h2>开始长者评估</h2>
         <p class="access-card__description">
-          老人端无需登录即可直接开始当前评估会话，适合现场陪同或自主使用。
+          长者端无需登录即可直接开始当前评估会话，适合现场陪同或自主使用。
         </p>
       </template>
 
