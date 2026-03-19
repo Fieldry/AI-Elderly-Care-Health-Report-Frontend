@@ -302,7 +302,7 @@ onMounted(async () => {
         <header class="chat-card__header">
           <div>
             <h2>对话采集</h2>
-            <p>请直接描述老人的身体情况、慢病、生活能力和日常习惯。</p>
+            <p>请直接描述您的身体情况、慢病、生活能力和日常习惯。</p>
           </div>
           <span class="status-badge">{{ sessionId ? `会话 ${sessionId.slice(0, 8)}` : '会话准备中' }}</span>
         </header>
@@ -381,7 +381,7 @@ onMounted(async () => {
             开始新评估
           </button>
           <button class="ghost-button summary-card__action" type="button" @click="router.push('/access/elderly')">
-            返回长者首页
+            返回首页
           </button>
         </section>
 
@@ -415,7 +415,7 @@ onMounted(async () => {
   padding: 24px;
   display: grid;
   grid-template-rows: auto auto 1fr auto;
-  min-height: 48rem;
+  height: clamp(42rem, calc(100vh - 9.5rem), 52rem);
 }
 
 .chat-card__header {
@@ -456,6 +456,7 @@ onMounted(async () => {
 
 .chat-stream {
   margin-top: 18px;
+  min-height: 0;
   overflow: auto;
   display: grid;
   gap: 14px;
@@ -489,13 +490,11 @@ onMounted(async () => {
 }
 
 .message-bubble__content {
-  max-height: 18rem;
-  overflow: auto;
-  padding-right: 4px;
   color: var(--ink-strong);
   font-size: 1.35rem;
   line-height: 1.9;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .empty-tip {
@@ -639,7 +638,7 @@ onMounted(async () => {
   }
 
   .chat-card {
-    min-height: 36rem;
+    height: min(42rem, calc(100vh - 8rem));
   }
 
   .side-panel {
@@ -651,6 +650,10 @@ onMounted(async () => {
   .chat-card,
   .summary-card {
     padding: 22px;
+  }
+
+  .chat-card {
+    height: min(40rem, calc(100vh - 7rem));
   }
 
   .composer-actions {
