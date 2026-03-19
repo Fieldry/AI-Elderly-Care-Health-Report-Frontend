@@ -72,15 +72,6 @@ async function navigate(item: NavItem) {
   }
 }
 
-async function goToRole(role: Role) {
-  if (session.value?.role === role) {
-    await router.push(roleHomePath(role))
-    return
-  }
-
-  await router.push(`/access/${role}`)
-}
-
 async function handleLogout() {
   const token = session.value?.token
   clearStoredSession()
@@ -115,10 +106,6 @@ async function handleLogout() {
         </nav>
 
         <div class="app-actions">
-          <button class="app-actions__ghost" type="button" @click="goToRole('elderly')">老人端</button>
-          <button class="app-actions__ghost" type="button" @click="goToRole('family')">家属端</button>
-          <button class="app-actions__ghost" type="button" @click="goToRole('doctor')">医生端</button>
-
           <div v-if="session" class="session-pill">
             <span>{{ currentRoleLabel }}</span>
             <strong>{{ session.userName }}</strong>

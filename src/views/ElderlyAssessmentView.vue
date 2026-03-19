@@ -295,28 +295,6 @@ onMounted(async () => {
 
 <template>
   <div class="page-width role-page elderly-page">
-    <section class="elderly-hero surface-card">
-      <div>
-        <p class="eyebrow">老人端</p>
-        <h1>健康评估对话</h1>
-        <p class="elderly-hero__text">
-          用对话和语音逐步采集老人健康信息，右侧同步查看结构化画像和当前可用报告。
-        </p>
-      </div>
-
-      <div class="elderly-hero__meta">
-        <div class="hero-stat">
-          <span>当前状态</span>
-          <strong>{{ statusText }}</strong>
-        </div>
-        <div class="hero-stat">
-          <span>关键信息完整度</span>
-          <strong>{{ progressPercent }}%</strong>
-        </div>
-        <button class="secondary-button" type="button" @click="createNewSession">开始新评估</button>
-      </div>
-    </section>
-
     <section class="assessment-layout">
       <article class="surface-card chat-card">
         <header class="chat-card__header">
@@ -379,6 +357,29 @@ onMounted(async () => {
       </article>
 
       <aside class="side-panel">
+        <section class="surface-card summary-card">
+          <p class="eyebrow">老人端</p>
+          <h1>健康评估对话</h1>
+          <p class="summary-card__text">
+            用对话和语音逐步采集老人健康信息，右侧同步查看状态、结构化画像和当前可用报告。
+          </p>
+
+          <div class="summary-stats">
+            <div class="summary-stat">
+              <span>当前状态</span>
+              <strong>{{ statusText }}</strong>
+            </div>
+            <div class="summary-stat">
+              <span>关键信息完整度</span>
+              <strong>{{ progressPercent }}%</strong>
+            </div>
+          </div>
+
+          <button class="secondary-button summary-card__action" type="button" @click="createNewSession">
+            开始新评估
+          </button>
+        </section>
+
         <section v-if="missingCoreFields.length > 0" class="surface-card hint-card">
           <h3>建议继续补充</h3>
           <div class="hint-chip-list">
@@ -395,65 +396,21 @@ onMounted(async () => {
 
 <style scoped>
 .elderly-page {
-  display: grid;
-  gap: 22px;
-}
-
-.elderly-hero {
-  padding: 30px 32px;
-  display: grid;
-  grid-template-columns: 1.4fr 1fr;
-  gap: 20px;
-  align-items: center;
-}
-
-.elderly-hero h1 {
-  margin: 12px 0;
-  color: var(--ink-strong);
-  font-size: clamp(2.5rem, 4vw, 3.6rem);
-}
-
-.elderly-hero__text {
-  margin: 0;
-  color: var(--ink-muted);
-  font-size: 1.25rem;
-  line-height: 1.8;
-}
-
-.elderly-hero__meta {
-  display: grid;
-  gap: 14px;
-}
-
-.hero-stat {
-  padding: 18px 20px;
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.82);
-  border: 1px solid rgba(120, 164, 199, 0.16);
-}
-
-.hero-stat span {
-  display: block;
-  color: var(--ink-muted);
-  margin-bottom: 8px;
-}
-
-.hero-stat strong {
-  color: var(--ink-strong);
-  font-size: 1.6rem;
+  padding-top: 16px;
 }
 
 .assessment-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.9fr);
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.85fr);
   gap: 22px;
+  align-items: start;
 }
 
 .chat-card {
   padding: 24px;
   display: grid;
   grid-template-rows: auto auto 1fr auto;
-  min-height: 42rem;
+  min-height: 48rem;
 }
 
 .chat-card__header {
@@ -597,6 +554,55 @@ onMounted(async () => {
   display: grid;
   gap: 18px;
   align-content: start;
+  position: sticky;
+  top: 110px;
+}
+
+.summary-card {
+  padding: 24px;
+}
+
+.summary-card h1 {
+  margin: 12px 0;
+  color: var(--ink-strong);
+  font-size: clamp(2rem, 3vw, 2.8rem);
+  line-height: 1.15;
+}
+
+.summary-card__text {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 1.05rem;
+  line-height: 1.8;
+}
+
+.summary-stats {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.summary-stat {
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(120, 164, 199, 0.16);
+}
+
+.summary-stat span {
+  display: block;
+  color: var(--ink-muted);
+  margin-bottom: 8px;
+}
+
+.summary-stat strong {
+  color: var(--ink-strong);
+  font-size: 1.5rem;
+}
+
+.summary-card__action {
+  width: 100%;
+  margin-top: 18px;
 }
 
 .hint-card {
@@ -623,7 +629,6 @@ onMounted(async () => {
 }
 
 @media (max-width: 1080px) {
-  .elderly-hero,
   .assessment-layout {
     grid-template-columns: 1fr;
   }
@@ -631,11 +636,15 @@ onMounted(async () => {
   .chat-card {
     min-height: 36rem;
   }
+
+  .side-panel {
+    position: static;
+  }
 }
 
 @media (max-width: 720px) {
-  .elderly-hero,
-  .chat-card {
+  .chat-card,
+  .summary-card {
     padding: 22px;
   }
 
