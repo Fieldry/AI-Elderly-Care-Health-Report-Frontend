@@ -269,3 +269,34 @@ export function getIdentityTitle(profile: ProfileRecord, fallback: string) {
   const summary = [age, sex].filter(Boolean).join(' / ')
   return summary || fallback
 }
+
+export function serializeProfilePayload(profile: ProfileRecord) {
+  const payload: ProfileRecord = {}
+
+  for (const field of PROFILE_FIELDS) {
+    const rawValue = profile[field.key]
+
+    if (rawValue === null || rawValue === undefined) {
+      continue
+    }
+
+    if (typeof rawValue === 'string') {
+      const trimmed = rawValue.trim()
+      if (!trimmed) {
+        continue
+      }
+
+      if (field.type === 'number') {
+        const numericValue = Number(trimmed)
+        payload[field.key] = Number.isFinite(numericValue) ? numericValue : trimmed
+      } else {
+        payload[field.key] = trimmed
+      }
+      continue
+    }
+
+    payload[field.key] = rawValue
+  }
+
+  return payload
+}
