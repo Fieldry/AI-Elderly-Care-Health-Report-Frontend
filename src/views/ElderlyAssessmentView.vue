@@ -8,7 +8,7 @@ import ReportSummary from '@/components/ReportSummary.vue'
 import { useGoogleStreamingSpeech } from '@/composables/useGoogleStreamingSpeech'
 import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
 import type { ChatMessage } from '@/types'
-import { estimateProfileCompletion, getMissingCoreFields } from '@/utils/profile'
+import { getMissingCoreFields } from '@/utils/profile'
 import { mergeProfileSnapshots } from '@/utils/report'
 
 const STORAGE_KEY = 'ai-elderly-care.current-session'
@@ -23,6 +23,7 @@ const loading = ref(false)
 const sending = ref(false)
 const conversationState = ref('greeting')
 const errorMessage = ref('')
+const completionPercent = ref<number | null>(null)
 
 const chatBodyRef = ref<HTMLElement | null>(null)
 
@@ -56,8 +57,10 @@ const {
   }
 })
 
-const progressPercent = computed(() => Math.round(estimateProfileCompletion(profile.value) * 100))
 const missingCoreFields = computed(() => getMissingCoreFields(profile.value))
+const progressPercentLabel = computed(() =>
+  completionPercent.value === null ? '未获取' : `${completionPercent.value}%`
+)
 const voiceErrorMessage = computed(() => googleVoiceError.value || browserVoiceError.value || '')
 const isVoiceAvailable = computed(() => isGoogleVoiceSupported.value || isBrowserVoiceSupported.value)
 const isVoiceActive = computed(
@@ -120,6 +123,48 @@ function clearVoiceInput() {
   abortBrowserVoiceRecognition()
 }
 
+function extractFirstSentence(content: string) {
+  const normalizedContent = content.trim()
+  if (!normalizedContent) {
+    return ''
+  }
+
+  const sentenceMatch = normalizedContent.match(/^.*?[。！？!?；;]/)
+  return sentenceMatch?.[0] || normalizedContent
+}
+
+function extractCompletionPercentFromMessage(content: string) {
+  const firstSentence = extractFirstSentence(content)
+  const matched = firstSentence.match(/字段完成率\s*(\d{1,3})%/)
+  if (!matched) {
+    return null
+  }
+
+  const numericValue = Number(matched[1])
+  if (!Number.isFinite(numericValue)) {
+    return null
+  }
+
+  return Math.min(100, Math.max(0, numericValue))
+}
+
+function syncCompletionPercentFromMessages(conversation: ChatMessage[]) {
+  for (let index = conversation.length - 1; index >= 0; index -= 1) {
+    const message = conversation[index]
+    if (message.role !== 'assistant') {
+      continue
+    }
+
+    const parsedPercent = extractCompletionPercentFromMessage(message.content)
+    if (parsedPercent !== null) {
+      completionPercent.value = parsedPercent
+      return
+    }
+  }
+
+  completionPercent.value = null
+}
+
 async function scrollChatToBottom() {
   await nextTick()
   chatBodyRef.value?.scrollTo({
@@ -166,6 +211,7 @@ async function loadExistingSession(targetSessionId: string) {
         : await getChatHistory(targetSessionId)
 
     messages.value = conversation
+    syncCompletionPercentFromMessages(conversation)
     profile.value = mergeProfileSnapshots(detail.profile || {})
     reports.value = detail.reports || []
     storeSessionId(targetSessionId)
@@ -191,6 +237,7 @@ async function createNewSession() {
         content: response.welcomeMessage
       }
     ]
+    completionPercent.value = extractCompletionPercentFromMessage(response.welcomeMessage)
     profile.value = {}
     reports.value = []
     conversationState.value = 'greeting'
@@ -238,6 +285,10 @@ async function handleSend() {
   try {
     const response = await sendChatMessage(sessionId.value, messageText)
     conversationState.value = response.state || 'collecting'
+    const parsedCompletionPercent = extractCompletionPercentFromMessage(response.message)
+    if (parsedCompletionPercent !== null) {
+      completionPercent.value = parsedCompletionPercent
+    }
 
     messages.value.push({
       role: 'assistant',
@@ -373,7 +424,7 @@ onMounted(async () => {
             </div>
             <div class="summary-stat">
               <span>关键信息完整度</span>
-              <strong>{{ progressPercent }}%</strong>
+              <strong>{{ progressPercentLabel }}</strong>
             </div>
           </div>
 
