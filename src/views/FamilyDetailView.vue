@@ -2,36 +2,15 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { saveSessionProfile } from '@/api/chat'
-import { getSessionDetail } from '@/api/chat'
 import { ApiError } from '@/api/core'
-import {
-  getFamilyElderly,
-  getFamilyReports,
-  getFamilySessionInfo,
-  sendFamilySessionMessage,
-  startFamilySession,
-  updateFamilyElderly
-} from '@/api/family'
+import { getFamilyElderly, getFamilyReports, updateFamilyElderly } from '@/api/family'
 import { exportReportPdf, generateReportForElderly, getReportDetail } from '@/api/report'
 import EmptyStateCard from '@/components/EmptyStateCard.vue'
-import ProfileOverview from '@/components/ProfileOverview.vue'
 import ReportDetailModal from '@/components/ReportDetailModal.vue'
-import {
-  clearStoredFamilyConversationSnapshot,
-  clearStoredFamilyConversationSessionId,
-  getStoredFamilyConversationSnapshot,
-  getStoredFamilyConversationSessionId,
-  setStoredFamilyConversationSnapshot,
-  setStoredFamilyConversationSessionId,
-  useAuthSession
-} from '@/session'
-import type { ChatMessage } from '@/types'
+import { useAuthSession } from '@/session'
 import {
   cloneProfileForForm,
   getIdentityTitle,
-  getMissingCoreFields,
-  PROFILE_FIELD_LABELS,
   PROFILE_FIELDS,
   PROFILE_GROUPS,
   serializeProfilePayload
@@ -50,21 +29,12 @@ const saving = ref(false)
 const reportsLoading = ref(false)
 const generatingReport = ref(false)
 const reportDetailLoading = ref(false)
-const familySessionLoading = ref(false)
-const familySessionSending = ref(false)
 const downloadingReportId = ref('')
 const errorMessage = ref('')
 const successMessage = ref('')
 const familyReports = ref<Array<Record<string, unknown>>>([])
 const selectedReportId = ref('')
 const selectedReportDetail = ref<Record<string, unknown> | null>(null)
-const familySessionId = ref('')
-const familySessionState = ref('')
-const familySessionProgress = ref<number | null>(null)
-const familyCollectedFields = ref<string[]>([])
-const familyMissingFields = ref<string[]>([])
-const familyMessages = ref<ChatMessage[]>([])
-const familyInput = ref('')
 const profileForm = reactive<Record<string, unknown>>({})
 
 const groupedFields = PROFILE_GROUPS.map((group) => ({
@@ -75,7 +45,6 @@ const groupedFields = PROFILE_GROUPS.map((group) => ({
 const displayTitle = computed(() =>
   getIdentityTitle(profileForm, `老人档案 ${props.elderlyId.slice(0, 8)}`)
 )
-const missingFields = computed(() => getMissingCoreFields(profileForm))
 const sortedReports = computed(() =>
   [...familyReports.value].sort((left, right) =>
     getReportGeneratedAt(right).localeCompare(getReportGeneratedAt(left))
@@ -88,36 +57,6 @@ const activeReport = computed(() => {
 
   return familyReports.value.find((report) => getReportId(report) === selectedReportId.value) || null
 })
-const familySessionStatusText = computed(() => {
-  const map: Record<string, string> = {
-    GREETING: '待开始访谈',
-    COLLECTING: '信息采集中',
-    CONFIRMING: '待确认',
-    GENERATING: '正在生成',
-    COMPLETED: '访谈已完成'
-  }
-
-  return map[familySessionState.value.trim().toUpperCase()] || (familySessionId.value ? '访谈已创建' : '尚未开始')
-})
-const familySessionProgressText = computed(() => {
-  if (familySessionProgress.value === null) {
-    return familySessionId.value ? '进行中' : '未开始'
-  }
-
-  return `${familySessionProgress.value}%`
-})
-const familyMissingFieldLabels = computed(() =>
-  familyMissingFields.value.map((field) => PROFILE_FIELD_LABELS[field] || field)
-)
-
-function normalizeProgressPercent(value: number | null | undefined) {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return null
-  }
-
-  const normalizedValue = value <= 1 ? value * 100 : value
-  return Math.max(0, Math.min(100, Math.round(normalizedValue)))
-}
 
 function formatDateTime(value: string) {
   if (!value) {
@@ -139,10 +78,6 @@ function formatDateTime(value: string) {
   })
 }
 
-function isSessionUnavailable(error: unknown) {
-  return error instanceof ApiError && (error.status === 401 || error.status === 403 || error.status === 404)
-}
-
 function resetMessages() {
   errorMessage.value = ''
   successMessage.value = ''
@@ -161,107 +96,6 @@ function applyProfileForm(profile: Record<string, unknown> | null | undefined) {
   }
 
   Object.assign(profileForm, clonedProfile)
-}
-
-function appendAssistantMessage(content: string | undefined) {
-  const normalizedContent = content?.trim()
-  if (!normalizedContent) {
-    return
-  }
-
-  const lastMessage = familyMessages.value[familyMessages.value.length - 1]
-  if (lastMessage?.role === 'assistant' && lastMessage.content === normalizedContent) {
-    return
-  }
-
-  familyMessages.value = [
-    ...familyMessages.value,
-    {
-      role: 'assistant',
-      content: normalizedContent
-    }
-  ]
-}
-
-function persistFamilyConversationSnapshot() {
-  if (!familySessionId.value) {
-    clearStoredFamilyConversationSnapshot(props.elderlyId)
-    return
-  }
-
-  setStoredFamilyConversationSnapshot(props.elderlyId, {
-    sessionId: familySessionId.value,
-    messages: familyMessages.value,
-    state: familySessionState.value || undefined,
-    collectedFields: familyCollectedFields.value,
-    missingFields: familyMissingFields.value
-  })
-}
-
-function resetFamilySession(shouldClearStorage = false) {
-  familySessionId.value = ''
-  familySessionState.value = ''
-  familySessionProgress.value = null
-  familyCollectedFields.value = []
-  familyMissingFields.value = []
-  familyMessages.value = []
-
-  if (shouldClearStorage) {
-    clearStoredFamilyConversationSessionId(props.elderlyId)
-  } else {
-    clearStoredFamilyConversationSnapshot(props.elderlyId)
-  }
-}
-
-function applyFamilySessionState(payload: {
-  sessionId: string
-  greeting?: string
-  reply?: string
-  message?: string
-  state?: string
-  progress?: number
-  collectedFields?: string[]
-  missingFields?: string[]
-  conversation?: ChatMessage[]
-  profile?: Record<string, unknown> | null
-  reports?: Array<Record<string, unknown>>
-}) {
-  if (payload.sessionId) {
-    familySessionId.value = payload.sessionId
-    setStoredFamilyConversationSessionId(props.elderlyId, payload.sessionId)
-  }
-
-  if (payload.state) {
-    familySessionState.value = payload.state
-  }
-
-  if (payload.progress !== undefined) {
-    familySessionProgress.value = normalizeProgressPercent(payload.progress)
-  }
-
-  if (payload.collectedFields) {
-    familyCollectedFields.value = payload.collectedFields
-  }
-
-  if (payload.missingFields) {
-    familyMissingFields.value = payload.missingFields
-  }
-
-  if (payload.conversation && payload.conversation.length > 0) {
-    familyMessages.value = payload.conversation
-  } else {
-    appendAssistantMessage(payload.greeting || payload.reply || payload.message)
-  }
-
-  if (payload.profile) {
-    applyProfileForm(payload.profile)
-  }
-
-  if (payload.reports && payload.reports.length > 0) {
-    familyReports.value = payload.reports
-  }
-
-  persistFamilyConversationSnapshot()
 }
 
 async function loadProfileDetail() {
@@ -327,142 +161,6 @@ async function openReportDetail(reportId: string) {
   }
 }
 
-async function loadFamilySessionWorkspace(targetSessionId: string) {
-  if (!session.value?.token || session.value.role !== 'family') {
-    return
-  }
-
-  try {
-    const detail = await getSessionDetail(targetSessionId, session.value.token)
-
-    if (detail.conversation && detail.conversation.length > 0) {
-      familyMessages.value = detail.conversation
-    }
-
-    if (detail.profile && Object.keys(detail.profile).length > 0) {
-      applyProfileForm(detail.profile)
-    }
-
-    if (detail.reports && detail.reports.length > 0) {
-      familyReports.value = detail.reports
-    }
-  } catch {
-    // Family sessions do not always persist a workspace conversation file.
-  } finally {
-    persistFamilyConversationSnapshot()
-  }
-}
-
-async function loadStoredFamilySession() {
-  if (!session.value?.token || session.value.role !== 'family') {
-    return
-  }
-
-  const storedSessionId = getStoredFamilyConversationSessionId(props.elderlyId)
-  if (!storedSessionId) {
-    resetFamilySession()
-    return
-  }
-
-  familySessionId.value = storedSessionId
-
-  const storedSnapshot = getStoredFamilyConversationSnapshot(props.elderlyId)
-  if (storedSnapshot?.sessionId === storedSessionId) {
-    familyMessages.value = storedSnapshot.messages
-    familySessionState.value = storedSnapshot.state || familySessionState.value
-    familyCollectedFields.value = storedSnapshot.collectedFields || []
-    familyMissingFields.value = storedSnapshot.missingFields || []
-  }
-
-  familySessionLoading.value = true
-
-  try {
-    const [response] = await Promise.all([
-      getFamilySessionInfo(storedSessionId, session.value.token),
-      loadFamilySessionWorkspace(storedSessionId)
-    ])
-    applyFamilySessionState(response)
-  } catch (error) {
-    if (isSessionUnavailable(error)) {
-      resetFamilySession(true)
-      return
-    }
-
-    errorMessage.value =
-      error instanceof Error ? error.message : '恢复家属访谈失败，请稍后重试。'
-  } finally {
-    familySessionLoading.value = false
-  }
-}
-
-async function startInterviewSession() {
-  if (!session.value?.token || session.value.role !== 'family') {
-    errorMessage.value = '当前登录已失效，请重新进入家属端。'
-    return
-  }
-
-  familySessionLoading.value = true
-  errorMessage.value = ''
-
-  try {
-    resetFamilySession()
-    const response = await startFamilySession(props.elderlyId, session.value.token)
-    applyFamilySessionState(response)
-    await Promise.all([loadReports(), loadProfileDetail()])
-  } catch (error) {
-    errorMessage.value =
-      error instanceof Error ? error.message : '启动家属访谈失败，请稍后重试。'
-  } finally {
-    familySessionLoading.value = false
-  }
-}
-
-async function sendInterviewMessage() {
-  if (!session.value?.token || session.value.role !== 'family') {
-    errorMessage.value = '当前登录已失效，请重新进入家属端。'
-    return
-  }
-
-  if (!familyInput.value.trim() || familySessionSending.value) {
-    return
-  }
-
-  if (!familySessionId.value) {
-    await startInterviewSession()
-    if (!familySessionId.value) {
-      return
-    }
-  }
-
-  const messageText = familyInput.value.trim()
-  familyInput.value = ''
-  familySessionSending.value = true
-  errorMessage.value = ''
-
-  familyMessages.value = [
-    ...familyMessages.value,
-    {
-      role: 'user',
-      content: messageText
-    }
-  ]
-  persistFamilyConversationSnapshot()
-
-  try {
-    const response = await sendFamilySessionMessage(familySessionId.value, session.value.token, messageText)
-    applyFamilySessionState(response)
-    await Promise.all([loadReports(), loadProfileDetail()])
-  } catch (error) {
-    if (isSessionUnavailable(error)) {
-      resetFamilySession(true)
-    }
-    errorMessage.value =
-      error instanceof Error ? error.message : '发送访谈消息失败，请稍后重试。'
-  } finally {
-    familySessionSending.value = false
-  }
-}
-
 async function saveProfile() {
   if (!session.value?.token || session.value.role !== 'family') {
     errorMessage.value = '当前登录已失效，请重新进入家属端。'
@@ -475,23 +173,8 @@ async function saveProfile() {
   try {
     const payload = serializeProfilePayload(profileForm)
     await updateFamilyElderly(props.elderlyId, session.value.token, payload)
-
-    let workspaceSynced = false
-    if (familySessionId.value) {
-      try {
-        await saveSessionProfile(familySessionId.value, payload, session.value.token)
-        workspaceSynced = true
-      } catch (error) {
-        if (isSessionUnavailable(error)) {
-          resetFamilySession(true)
-        }
-      }
-    }
-
-    successMessage.value = workspaceSynced
-      ? '画像信息已保存，并同步到当前家属访谈工作区。'
-      : '画像信息已保存。'
-    await Promise.all([loadProfileDetail(), loadReports(), loadStoredFamilySession()])
+    successMessage.value = '画像信息已保存。'
+    await Promise.all([loadProfileDetail(), loadReports()])
   } catch (error) {
     errorMessage.value =
       error instanceof Error ? error.message : '保存失败，请稍后重试。'
@@ -554,30 +237,12 @@ async function handleDownloadReport(reportId: string) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadProfileDetail(), loadReports(), loadStoredFamilySession()])
+  await Promise.all([loadProfileDetail(), loadReports()])
 })
 </script>
 
 <template>
   <div class="page-width role-page family-detail-page">
-    <section class="surface-card detail-hero">
-      <div>
-        <p class="eyebrow">家属端详情</p>
-        <h1>{{ displayTitle }}</h1>
-        <p>在这里补全画像、发起家属访谈，并为当前老人生成和查看健康报告。</p>
-      </div>
-
-      <div class="detail-hero__actions">
-        <button class="secondary-button" type="button" @click="router.push('/family/hub')">返回列表</button>
-        <button class="primary-button" type="button" :disabled="loading || saving" @click="saveProfile">
-          {{ saving ? '保存中...' : '保存画像' }}
-        </button>
-        <button class="ghost-button" type="button" :disabled="generatingReport" @click="handleGenerateReport">
-          {{ generatingReport ? '生成中...' : '生成报告' }}
-        </button>
-      </div>
-    </section>
-
     <p v-if="errorMessage" class="error-banner">{{ errorMessage }}</p>
     <p v-if="successMessage" class="success-banner">{{ successMessage }}</p>
 
@@ -585,8 +250,19 @@ onMounted(async () => {
       <article class="surface-card detail-form-card">
         <header class="detail-form-card__header">
           <div>
-            <h2>画像补全</h2>
+            <p class="eyebrow">当前老人</p>
+            <h1>{{ displayTitle }}</h1>
             <p>按分组补充老人基本信息、功能状态、慢病与社会支持等字段。</p>
+          </div>
+
+          <div class="detail-form-card__actions">
+            <button class="secondary-button" type="button" @click="router.push('/family/hub')">返回列表</button>
+            <button class="primary-button" type="button" :disabled="loading || saving" @click="saveProfile">
+              {{ saving ? '保存中...' : '保存画像' }}
+            </button>
+            <button class="ghost-button" type="button" :disabled="generatingReport" @click="handleGenerateReport">
+              {{ generatingReport ? '生成中...' : '生成报告' }}
+            </button>
           </div>
         </header>
 
@@ -595,7 +271,7 @@ onMounted(async () => {
         <div v-else class="detail-form scroll-panel">
           <section v-for="group in groupedFields" :key="group.group" class="form-group-card">
             <div class="form-group-card__header">
-              <h3>{{ group.group }}</h3>
+              <h2>{{ group.group }}</h2>
             </div>
 
             <div class="field-grid">
@@ -625,93 +301,43 @@ onMounted(async () => {
       </article>
 
       <aside class="detail-side">
-        <section class="surface-card interview-card">
+        <section class="surface-card reports-shell">
           <header class="reports-shell__header">
-            <h3>家属访谈</h3>
-            <span>{{ familySessionStatusText }} · {{ familySessionProgressText }}</span>
+            <h3>报告列表</h3>
+            <span>{{ reportsLoading ? '加载中' : sortedReports.length > 0 ? `${sortedReports.length} 份` : '0 份' }}</span>
           </header>
 
-          <div class="interview-actions">
-            <button class="secondary-button" type="button" :disabled="familySessionLoading" @click="startInterviewSession">
-              {{ familySessionLoading ? '启动中...' : familySessionId ? '重新开始访谈' : '开始家属访谈' }}
-            </button>
-            <p v-if="familySessionId" class="interview-meta">当前会话：{{ familySessionId }}</p>
-          </div>
-
-          <div v-if="familyMissingFieldLabels.length > 0" class="hint-chip-list interview-chip-list">
-            <span v-for="field in familyMissingFieldLabels" :key="field" class="hint-chip">{{ field }}</span>
-          </div>
-
-          <div v-if="familyMessages.length > 0" class="conversation-list scroll-panel">
+          <div v-if="sortedReports.length > 0" class="report-list scroll-panel">
             <article
-              v-for="(message, index) in familyMessages"
-              :key="`${message.role}-${index}`"
-              class="conversation-item"
+              v-for="report in sortedReports"
+              :key="getReportId(report) || JSON.stringify(report)"
+              class="report-item"
             >
-              <strong>{{ message.role === 'assistant' ? '助手' : '家属' }}</strong>
-              <p>{{ message.content }}</p>
+              <div>
+                <strong>{{ getReportId(report) || '未命名报告' }}</strong>
+                <p>{{ formatDateTime(getReportGeneratedAt(report)) }}</p>
+              </div>
+              <div class="report-item__actions">
+                <button class="secondary-button" type="button" @click="openReportDetail(getReportId(report))">
+                  查看报告
+                </button>
+                <button
+                  class="ghost-button"
+                  type="button"
+                  :disabled="downloadingReportId === getReportId(report)"
+                  @click="handleDownloadReport(getReportId(report))"
+                >
+                  {{ downloadingReportId === getReportId(report) ? '导出中...' : '导出 PDF' }}
+                </button>
+              </div>
             </article>
           </div>
 
           <EmptyStateCard
             v-else
-            title="尚未开始家属访谈"
-            description="点击上方按钮后会为当前老人创建家属侧会话，再通过消息补充照护信息。"
+            title="家属端暂无报告返回"
+            description="当前老人还没有生成报告，可先补全画像。"
           />
-
-          <div class="interview-composer">
-            <textarea
-              v-model="familyInput"
-              rows="4"
-              :disabled="familySessionLoading || familySessionSending"
-              placeholder="例如：老人最近夜间起夜增多，饭量下降，家里主要由女儿照护。"
-              @keydown.enter.exact.prevent="sendInterviewMessage"
-            />
-            <button class="primary-button" type="button" :disabled="familySessionSending" @click="sendInterviewMessage">
-              {{ familySessionSending ? '发送中...' : '发送访谈消息' }}
-            </button>
-          </div>
-        </section>
-
-        <section class="surface-card">
-          <div class="reports-shell">
-            <header class="reports-shell__header">
-              <h3>报告列表</h3>
-              <span>{{ reportsLoading ? '加载中' : sortedReports.length > 0 ? `${sortedReports.length} 份` : '0 份' }}</span>
-            </header>
-
-            <div v-if="sortedReports.length > 0" class="report-list scroll-panel">
-              <article
-                v-for="report in sortedReports"
-                :key="getReportId(report) || JSON.stringify(report)"
-                class="report-item"
-              >
-                <div>
-                  <strong>{{ getReportId(report) || '未命名报告' }}</strong>
-                  <p>{{ formatDateTime(getReportGeneratedAt(report)) }}</p>
-                </div>
-                <div class="report-item__actions">
-                  <button class="secondary-button" type="button" @click="openReportDetail(getReportId(report))">
-                    查看报告
-                  </button>
-                  <button
-                    class="ghost-button"
-                    type="button"
-                    :disabled="downloadingReportId === getReportId(report)"
-                    @click="handleDownloadReport(getReportId(report))"
-                  >
-                    {{ downloadingReportId === getReportId(report) ? '导出中...' : '导出 PDF' }}
-                  </button>
-                </div>
-              </article>
-            </div>
-
-            <EmptyStateCard
-              v-else
-              title="家属端暂无报告返回"
-              description="当前老人还没有生成报告，可先补全画像或开始家属访谈。"
-            />
-          </div>
         </section>
       </aside>
     </section>
@@ -735,32 +361,6 @@ onMounted(async () => {
   gap: 18px;
 }
 
-.detail-hero {
-  padding: 28px 30px;
-  display: flex;
-  justify-content: space-between;
-  gap: 18px;
-  align-items: flex-start;
-}
-
-.detail-hero h1 {
-  margin: 12px 0;
-  color: var(--ink-strong);
-  font-size: clamp(2rem, 3.4vw, 3rem);
-}
-
-.detail-hero p {
-  margin: 0;
-  color: var(--ink-muted);
-  line-height: 1.8;
-}
-
-.detail-hero__actions {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
 .detail-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.88fr);
@@ -768,18 +368,41 @@ onMounted(async () => {
   align-items: start;
 }
 
-.detail-form-card {
-  padding: 24px;
+.detail-form-card,
+.reports-shell,
+.loading-card {
+  padding: 22px;
 }
 
-.detail-form-card__header h2 {
-  margin: 0;
+.detail-form-card__header,
+.reports-shell__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.detail-form-card__header h1 {
+  margin: 10px 0 0;
   color: var(--ink-strong);
+  font-size: clamp(1.9rem, 2.8vw, 2.4rem);
+}
+
+.detail-form-card__header p,
+.reports-shell__header span,
+.report-item p {
+  color: var(--ink-muted);
 }
 
 .detail-form-card__header p {
-  margin: 8px 0 0;
-  color: var(--ink-muted);
+  margin: 10px 0 0;
+  line-height: 1.7;
+}
+
+.detail-form-card__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .detail-form {
@@ -798,9 +421,10 @@ onMounted(async () => {
   border: 1px solid rgba(120, 164, 199, 0.16);
 }
 
-.form-group-card__header h3 {
+.form-group-card__header h2 {
   margin: 0 0 14px;
   color: var(--ink-strong);
+  font-size: 1.1rem;
 }
 
 .field-grid {
@@ -820,17 +444,10 @@ onMounted(async () => {
 }
 
 .field input,
-.field select,
-.interview-composer textarea {
+.field select {
   min-height: 48px;
   border-radius: 16px;
   padding: 0 14px;
-}
-
-.interview-composer textarea {
-  min-height: 120px;
-  padding-top: 14px;
-  resize: vertical;
 }
 
 .detail-side {
@@ -838,103 +455,38 @@ onMounted(async () => {
   gap: 18px;
 }
 
-.hint-card,
-.reports-shell,
-.interview-card {
-  padding: 22px;
-}
-
-.hint-card h3,
 .reports-shell__header h3 {
   margin: 0;
   color: var(--ink-strong);
 }
 
-.hint-card__text,
-.interview-meta,
-.report-item p,
-.conversation-item p {
-  color: var(--ink-muted);
-}
-
-.hint-chip-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.hint-chip {
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: rgba(90, 142, 209, 0.12);
-  color: var(--brand-strong);
-  font-weight: 700;
-}
-
-.reports-shell__header {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: baseline;
-}
-
-.reports-shell__header span {
-  color: var(--ink-muted);
-}
-
-.report-list,
-.conversation-list {
+.report-list {
   margin-top: 16px;
   display: grid;
   gap: 12px;
-  max-height: 20rem;
+  max-height: 24rem;
   overflow: auto;
 }
 
-.report-item,
-.conversation-item {
+.report-item {
   padding: 14px 16px;
   border-radius: 18px;
   border: 1px solid rgba(90, 142, 209, 0.12);
   background: rgba(255, 255, 255, 0.84);
-}
-
-.report-item {
   display: grid;
   gap: 12px;
 }
 
-.report-item p,
-.conversation-item p {
+.report-item p {
   margin: 6px 0 0;
   line-height: 1.7;
 }
 
-.report-item__actions,
-.interview-actions {
+.report-item__actions {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
   align-items: center;
-}
-
-.interview-actions {
-  margin-top: 16px;
-}
-
-.interview-chip-list {
-  margin-top: 12px;
-}
-
-.conversation-item strong {
-  color: var(--ink-strong);
-}
-
-.interview-composer {
-  margin-top: 16px;
-  display: grid;
-  gap: 12px;
 }
 
 .loading-card,
@@ -954,30 +506,39 @@ onMounted(async () => {
   color: #28724f;
 }
 
+.loading-card {
+  color: var(--ink-muted);
+}
+
 @media (max-width: 980px) {
   .detail-layout {
     grid-template-columns: 1fr;
   }
+}
 
-  .detail-hero {
+@media (max-width: 760px) {
+  .detail-form-card__header,
+  .reports-shell__header {
     flex-direction: column;
+    align-items: stretch;
+  }
+
+  .detail-form-card__actions,
+  .report-item__actions,
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-form-card__actions {
+    display: grid;
   }
 }
 
 @media (max-width: 640px) {
-  .detail-hero,
   .detail-form-card,
-  .hint-card,
   .reports-shell,
-  .interview-card {
+  .loading-card {
     padding: 20px;
-  }
-
-  .detail-hero__actions,
-  .report-item__actions,
-  .interview-actions {
-    flex-direction: column;
-    align-items: stretch;
   }
 }
 </style>
