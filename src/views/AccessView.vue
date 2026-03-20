@@ -147,7 +147,11 @@ async function handleContinue() {
           elderlyId: form.elderlyId.trim(),
           relation: form.relation.trim()
         })
-      : await loginWithPassword(form.phone.trim(), form.password.trim())
+      : await loginWithPassword(
+          form.phone.trim(),
+          form.password.trim(),
+          props.role === 'doctor' ? 'doctor' : 'family'
+        )
 
     storeSessionFromResponse(response)
     await router.push(roleHomePath(props.role))

@@ -1,11 +1,11 @@
 import { buildAuthHeaders, buildJsonHeaders, requestJson } from '@/api/core'
-import type { AuthResponse, FamilyBindPayload, FamilyRegisterPayload } from '@/types'
+import type { AuthResponse, FamilyBindPayload, FamilyRegisterPayload, Role } from '@/types'
 
-export function loginWithPassword(phone: string, password: string) {
+export function loginWithPassword(phone: string, password: string, role: Extract<Role, 'family' | 'doctor'> = 'family') {
   return requestJson<AuthResponse>('/auth/login', {
     method: 'POST',
     headers: buildJsonHeaders(),
-    body: JSON.stringify({ phone, password })
+    body: JSON.stringify({ phone, password, role })
   })
 }
 

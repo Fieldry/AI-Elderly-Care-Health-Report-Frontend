@@ -131,10 +131,17 @@ export interface FamilyReportsResponse {
 
 export interface FamilySessionState {
   sessionId: string
+  session_id?: string
+  elderlyId?: string
+  elderly_id?: string
+  greeting?: string
+  reply?: string
   message?: string
   state?: string
   progress?: number
   completed?: boolean
+  collectedFields?: string[]
+  missingFields?: string[]
   conversation?: ChatMessage[]
   profile?: Record<string, unknown> | null
   reports?: Array<Record<string, unknown>>
@@ -145,4 +152,110 @@ export interface ReportGenerateResponse {
   sessionId?: string
   report?: Record<string, unknown>
   reports?: Array<Record<string, unknown>>
+}
+
+export interface DoctorManagementState {
+  elderly_user_id?: string
+  doctor_id?: string
+  is_key_case: boolean
+  management_status: string
+  contacted_family: boolean
+  arranged_revisit: boolean
+  referred: boolean
+  next_followup_at?: string | null
+  last_followup_at?: string | null
+  last_followup_type?: string | null
+  updated_by?: string | null
+  updated_at?: string | null
+}
+
+export interface DoctorFollowup {
+  followup_id: string
+  elderly_user_id: string
+  doctor_id: string
+  visit_type: string
+  findings: string
+  recommendations: string[]
+  contacted_family: boolean
+  arranged_revisit: boolean
+  referred: boolean
+  next_followup_at?: string | null
+  notes: string
+  created_at: string
+  updated_at: string
+}
+
+export interface DoctorOverview {
+  elderly_id?: string
+  age?: number | string | null
+  sex?: string | null
+  residence?: string | null
+  living_arrangement?: string | null
+  marital_status?: string | null
+  chronic_conditions: string[]
+  chronic_summary: string
+  current_risk_level: string
+  functional_status_level: string
+  functional_status_text: string
+  risk_tags: string[]
+  recent_change: string
+  last_assessment_at?: string | null
+  main_problems: string[]
+  high_risk_reasons: string[]
+  summary: string
+  recommended_actions: string[]
+  latest_report_review?: Record<string, unknown> | null
+  doctor_management?: DoctorManagementState | null
+  latest_followup?: DoctorFollowup | null
+}
+
+export interface DoctorElderlySummary {
+  elderly_id: string
+  elderlyId?: string
+  name: string
+  created_at: string
+  updated_at: string
+  has_profile: boolean
+  has_report: boolean
+  session_count: number
+  report_count: number
+  latest_session_id?: string
+  latest_report_id?: string
+  overview: DoctorOverview | null
+  management: DoctorManagementState
+  latest_followup?: DoctorFollowup | null
+}
+
+export interface DoctorElderlyDetail {
+  elderly_id: string
+  elderlyId?: string
+  name: string
+  created_at: string
+  updated_at: string
+  profile: Record<string, unknown>
+  sessions: SessionMetadata[]
+  reports: Array<Record<string, unknown>>
+  overview: DoctorOverview | null
+  management: DoctorManagementState
+  followups: DoctorFollowup[]
+}
+
+export interface DoctorFollowupCreatePayload {
+  visitType: '门诊' | '电话' | '上门'
+  findings: string
+  recommendations: string[]
+  contactedFamily: boolean
+  arrangedRevisit: boolean
+  referred: boolean
+  nextFollowupAt?: string
+  notes: string
+}
+
+export interface DoctorManagementUpdatePayload {
+  isKeyCase?: boolean
+  managementStatus?: string
+  contactedFamily?: boolean
+  arrangedRevisit?: boolean
+  referred?: boolean
+  nextFollowupAt?: string
 }

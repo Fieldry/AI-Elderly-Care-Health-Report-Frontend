@@ -51,10 +51,25 @@ function normalizeFamilySessionState(value: unknown) {
   const dataRecord = asRecord(record.data) || record
   const sessionId =
     getString(dataRecord, 'sessionId', 'session_id') || getString(record, 'sessionId', 'session_id')
+  const elderlyId =
+    getString(dataRecord, 'elderlyId', 'elderly_id') || getString(record, 'elderlyId', 'elderly_id')
+  const greeting = getString(record, 'greeting') || getString(dataRecord, 'greeting') || undefined
+  const reply = getString(record, 'reply') || getString(dataRecord, 'reply') || undefined
+  const message =
+    reply ||
+    greeting ||
+    getString(record, 'message') ||
+    getString(dataRecord, 'message') ||
+    undefined
 
   return {
     sessionId,
-    message: getString(record, 'message') || getString(dataRecord, 'message') || undefined,
+    session_id: sessionId || undefined,
+    elderlyId: elderlyId || undefined,
+    elderly_id: elderlyId || undefined,
+    greeting,
+    reply,
+    message,
     state: getString(record, 'state') || getString(dataRecord, 'state') || undefined,
     progress: getNumber(record, 'progress') ?? getNumber(dataRecord, 'progress') ?? undefined,
     completed:
@@ -66,6 +81,12 @@ function normalizeFamilySessionState(value: unknown) {
     conversation: asArray(record.conversation ?? record.history ?? dataRecord.conversation ?? dataRecord.history)
       .map(normalizeChatMessage)
       .filter(Boolean) as ChatMessage[],
+    collectedFields: asArray<string>(record.collected_fields ?? record.collectedFields ?? dataRecord.collected_fields ?? dataRecord.collectedFields).filter(
+      (item) => typeof item === 'string'
+    ),
+    missingFields: asArray<string>(record.missing_fields ?? record.missingFields ?? dataRecord.missing_fields ?? dataRecord.missingFields).filter(
+      (item) => typeof item === 'string'
+    ),
     profile: asRecord(record.profile ?? dataRecord.profile),
     reports: asArray<Record<string, unknown>>(record.reports ?? dataRecord.reports)
       .map((item) => asRecord(item) || {})
@@ -128,7 +149,7 @@ export async function sendFamilySessionMessage(sessionId: string, token: string,
     method: 'POST',
     headers: buildJsonHeaders(buildAuthHeaders(token)),
     body: JSON.stringify({
-      message
+      content: message
     })
   })
 
