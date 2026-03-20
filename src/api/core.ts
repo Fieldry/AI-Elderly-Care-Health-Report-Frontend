@@ -1,4 +1,6 @@
 const backendOrigin = (import.meta.env.VITE_BACKEND_ORIGIN || '').trim()
+const legacyApiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').trim()
+const speechSocketUrl = (import.meta.env.VITE_STT_WS_URL || '').trim()
 
 export class ApiError extends Error {
   status: number
@@ -24,6 +26,100 @@ function normalizePath(path: string) {
   }
   return path
 }
+
+function stripTrailingSlashes(value: string) {
+  return value.replace(/\/+$/, '')
+}
+
+function ensureTrailingSlash(value: string) {
+  return value.endsWith('/') ? value : `${value}/`
+}
+
+function isAbsoluteHttpUrl(value: string) {
+  return /^https?:\/\//i.test(value)
+}
+
+function isAbsoluteWsUrl(value: string) {
+  return /^wss?:\/\//i.test(value)
+}
+
+function isProtocolRelativeUrl(value: string) {
+  return /^\/\//.test(value)
+}
+
+function looksLikeHost(value: string) {
+  return /^[a-z0-9.-]+(?::\d+)?(?:\/.*)?$/i.test(value)
+}
+
+function resolveWindowHttpOrigin() {
+  if (typeof window === 'undefined') {
+    return 'http://127.0.0.1:8001'
+  }
+
+  return window.location.origin
+}
+
+function resolveWindowWsOrigin() {
+  if (typeof window === 'undefined') {
+    return 'ws://127.0.0.1:8001'
+  }
+
+  return window.location.origin.replace(/^http/i, 'ws')
+}
+
+function normalizeHttpBase(value: string) {
+  const trimmedValue = value.trim()
+  if (!trimmedValue || trimmedValue.startsWith('/')) {
+    return ''
+  }
+
+  if (isAbsoluteHttpUrl(trimmedValue)) {
+    return stripTrailingSlashes(trimmedValue)
+  }
+
+  if (isProtocolRelativeUrl(trimmedValue)) {
+    const protocol = typeof window !== 'undefined' ? window.location.protocol : 'http:'
+    return stripTrailingSlashes(`${protocol}${trimmedValue}`)
+  }
+
+  if (looksLikeHost(trimmedValue)) {
+    return stripTrailingSlashes(`http://${trimmedValue}`)
+  }
+
+  return ''
+}
+
+function normalizeWsEndpoint(value: string) {
+  const trimmedValue = value.trim()
+  if (!trimmedValue) {
+    return ''
+  }
+
+  if (isAbsoluteWsUrl(trimmedValue)) {
+    return stripTrailingSlashes(trimmedValue)
+  }
+
+  if (isAbsoluteHttpUrl(trimmedValue)) {
+    return stripTrailingSlashes(trimmedValue.replace(/^http/i, 'ws'))
+  }
+
+  if (isProtocolRelativeUrl(trimmedValue)) {
+    const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return stripTrailingSlashes(`${protocol}${trimmedValue}`)
+  }
+
+  if (trimmedValue.startsWith('/')) {
+    return `${resolveWindowWsOrigin()}${trimmedValue}`
+  }
+
+  if (looksLikeHost(trimmedValue)) {
+    return stripTrailingSlashes(`ws://${trimmedValue}`)
+  }
+
+  return ''
+}
+
+const configuredBackendBase = normalizeHttpBase(backendOrigin || legacyApiBaseUrl)
 
 function mergeHeaders(headers?: HeadersInit) {
   const nextHeaders = new Headers(headers)
@@ -159,11 +255,34 @@ export function getNumber(record: Record<string, unknown> | null | undefined, ..
 
 export function buildBackendUrl(path: string) {
   const normalizedPath = normalizePath(path)
-  if (!backendOrigin) {
+  if (!configuredBackendBase) {
     return normalizedPath
   }
 
-  return `${backendOrigin}${normalizedPath}`
+  try {
+    return new URL(normalizedPath, ensureTrailingSlash(configuredBackendBase)).toString()
+  } catch {
+    return `${resolveWindowHttpOrigin()}${normalizedPath}`
+  }
+}
+
+export function buildWebSocketUrl(path: string) {
+  const normalizedPath = normalizePath(path)
+  const configuredSocketUrl = normalizeWsEndpoint(speechSocketUrl)
+  if (configuredSocketUrl) {
+    return configuredSocketUrl
+  }
+
+  if (configuredBackendBase) {
+    try {
+      const httpUrl = new URL(normalizedPath, ensureTrailingSlash(configuredBackendBase)).toString()
+      return httpUrl.replace(/^http/i, 'ws')
+    } catch {
+      return `${resolveWindowWsOrigin()}${normalizedPath}`
+    }
+  }
+
+  return `${resolveWindowWsOrigin()}${normalizedPath}`
 }
 
 export function buildJsonHeaders(headers?: HeadersInit) {

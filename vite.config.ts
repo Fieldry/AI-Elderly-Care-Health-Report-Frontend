@@ -31,6 +31,14 @@ export default defineConfig({
         target: proxyTarget,
         changeOrigin: true
       },
+      '/report': {
+        target: proxyTarget,
+        changeOrigin: true
+      },
+      '/elderly': {
+        target: proxyTarget,
+        changeOrigin: true
+      },
       '/ws': {
         target: proxyTarget,
         changeOrigin: true,

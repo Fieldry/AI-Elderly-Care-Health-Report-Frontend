@@ -1,5 +1,7 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 
+import { buildWebSocketUrl } from '@/api/core'
+
 interface AudioWindow extends Window {
   webkitAudioContext?: typeof AudioContext
 }
@@ -86,25 +88,6 @@ function resampleToPcm16(input: Float32Array, sourceSampleRate: number) {
   }
 
   return output
-}
-
-function resolveSocketUrl() {
-  const explicitUrl = (import.meta.env.VITE_STT_WS_URL || '').trim()
-  if (explicitUrl) {
-    return explicitUrl
-  }
-
-  const backendOrigin = (import.meta.env.VITE_BACKEND_ORIGIN || '').trim()
-  if (backendOrigin) {
-    return `${backendOrigin.replace(/^http/i, 'ws')}/ws/stt`
-  }
-
-  if (typeof window === 'undefined') {
-    return 'ws://127.0.0.1:8001/ws/stt'
-  }
-
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}/ws/stt`
 }
 
 function formatMediaError(error: unknown) {
@@ -343,7 +326,7 @@ export function useGoogleStreamingSpeech(options: UseGoogleStreamingSpeechOption
       const readyPromise = new Promise<void>((resolve, reject) => {
         let readyHandled = false
 
-        socket = new WebSocket(resolveSocketUrl())
+        socket = new WebSocket(buildWebSocketUrl('/ws/stt'))
         socket.binaryType = 'arraybuffer'
 
         socket.onopen = () => {
