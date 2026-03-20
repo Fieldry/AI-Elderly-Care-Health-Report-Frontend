@@ -2,7 +2,12 @@
 import { computed, nextTick } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 
-import { clearStoredSession, roleHomePath, useAuthSession } from '@/session'
+import {
+  clearStoredFamilyConversationSessions,
+  clearStoredSession,
+  roleHomePath,
+  useAuthSession
+} from '@/session'
 import { logoutWithToken } from '@/api/auth'
 import type { Role } from '@/types'
 
@@ -90,6 +95,7 @@ async function navigate(item: NavItem) {
 
 async function handleLogout() {
   const token = session.value?.token
+  clearStoredFamilyConversationSessions()
   clearStoredSession()
   await logoutWithToken(token)
   await router.push('/')

@@ -205,3 +205,22 @@ export function clearStoredFamilyConversationSessionId(elderlyId: string) {
   state.familySessionMap = nextMap
   writeFamilySessionMap(nextMap)
 }
+
+export function clearStoredFamilyConversationSessions() {
+  state.familySessionMap = {}
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(FAMILY_SESSION_MAP_KEY)
+  }
+}
+
+export function updateStoredFamilyElderlyIds(elderlyIds: string[]) {
+  const currentSession = state.session
+  if (!currentSession || currentSession.role !== 'family') {
+    return
+  }
+
+  setStoredSession({
+    ...currentSession,
+    elderlyIds
+  })
+}
