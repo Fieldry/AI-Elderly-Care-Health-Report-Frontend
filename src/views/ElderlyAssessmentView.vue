@@ -562,7 +562,7 @@ async function loadExistingSession(targetSessionId: string, token: string) {
     persistCurrentSnapshot(resolveSnapshotMetadata(targetSessionId))
     return detail
   } catch (error) {
-    if (applyStoredSessionSnapshot(targetSessionId, '后端会话加载失败，已恢复本机保存的会话内容。')) {
+    if (applyStoredSessionSnapshot(targetSessionId, '')) {
       return null
     }
     throw error
@@ -917,7 +917,6 @@ onMounted(async () => {
       <article class="surface-card chat-card">
         <header class="chat-card__header">
           <div class="chat-card__intro">
-            <p class="eyebrow">陪伴式评估</p>
             <h2>对话采集</h2>
             <p class="chat-card__lead">请像平常聊天一样，描述您的身体情况、生活能力和日常习惯。</p>
           </div>
@@ -933,17 +932,6 @@ onMounted(async () => {
             </button>
           </div>
         </header>
-
-        <div class="chat-card__meta">
-          <article class="chat-card__meta-pill">
-            <span>当前阶段</span>
-            <strong>{{ sessionStatusText }}</strong>
-          </article>
-          <article class="chat-card__meta-pill">
-            <span>信息完整度</span>
-            <strong>{{ progressPercentLabel }}</strong>
-          </article>
-        </div>
 
         <p v-if="errorMessage" class="error-banner">{{ errorMessage }}</p>
 
@@ -978,7 +966,6 @@ onMounted(async () => {
           <div class="composer-shell">
             <div class="composer-shell__header">
               <label class="composer-label" for="elderly-input">描述当前情况</label>
-              <span>按 Enter 发送，Shift + Enter 换行</span>
             </div>
             <textarea
               id="elderly-input"
@@ -986,7 +973,7 @@ onMounted(async () => {
               class="composer-textarea"
               :disabled="loading || sending"
               placeholder="例如：我今年 82 岁，最近走路容易喘，晚上睡眠一般，洗澡时需要家人帮忙。"
-              rows="4"
+              rows="1"
               @keydown.enter.exact.prevent="handleSend"
             />
             <div class="composer-actions">
@@ -1002,7 +989,6 @@ onMounted(async () => {
                 </button>
                 <div class="voice-panel__copy">
                   <strong>{{ isVoiceActive ? '正在聆听' : '语音输入' }}</strong>
-                  <p>{{ voiceErrorMessage || voiceHintText }}</p>
                 </div>
               </div>
               <button
@@ -1067,7 +1053,6 @@ onMounted(async () => {
           <div class="panel-header">
             <div>
               <h3>会话与报告</h3>
-              <p>每次评估会保留独立记录，并标记是否已经生成报告。</p>
             </div>
             <span>{{ sessionsLoading ? '同步中' : `${sessions.length} 条` }}</span>
           </div>
@@ -1212,14 +1197,14 @@ onMounted(async () => {
 }
 
 .chat-card__intro {
-  max-width: 35rem;
+  max-width: 20rem;
 }
 
 .chat-card__header-actions {
   display: grid;
   gap: 10px;
   justify-items: end;
-  max-width: 17rem;
+  max-width: 20rem;
 }
 
 .chat-card__header h2 {
@@ -1432,7 +1417,8 @@ onMounted(async () => {
   resize: none;
   border-radius: 22px;
   padding: 16px 18px;
-  min-height: 120px;
+  min-height: 30px;
+  min-width: 650px;
   line-height: 1.8;
   border-color: rgba(83, 169, 183, 0.16);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 249, 252, 0.96));
