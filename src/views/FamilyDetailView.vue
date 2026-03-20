@@ -16,7 +16,7 @@ import {
 import { exportReportPdf, generateReportForElderly, getReportDetail } from '@/api/report'
 import EmptyStateCard from '@/components/EmptyStateCard.vue'
 import ProfileOverview from '@/components/ProfileOverview.vue'
-import ReportSummary from '@/components/ReportSummary.vue'
+import ReportDetailModal from '@/components/ReportDetailModal.vue'
 import {
   clearStoredFamilyConversationSnapshot,
   clearStoredFamilyConversationSessionId,
@@ -36,7 +36,7 @@ import {
   PROFILE_GROUPS,
   serializeProfilePayload
 } from '@/utils/profile'
-import { getReportGeneratedAt, getReportId, normalizeReportRecord } from '@/utils/report'
+import { getReportGeneratedAt, getReportId } from '@/utils/report'
 
 const props = defineProps<{
   elderlyId: string
@@ -146,6 +146,11 @@ function isSessionUnavailable(error: unknown) {
 function resetMessages() {
   errorMessage.value = ''
   successMessage.value = ''
+}
+
+function closeReportModal() {
+  selectedReportId.value = ''
+  selectedReportDetail.value = null
 }
 
 function applyProfileForm(profile: Record<string, unknown> | null | undefined) {
@@ -687,7 +692,7 @@ onMounted(async () => {
                 </div>
                 <div class="report-item__actions">
                   <button class="secondary-button" type="button" @click="openReportDetail(getReportId(report))">
-                    查看详情
+                    查看报告
                   </button>
                   <button
                     class="ghost-button"
@@ -701,32 +706,26 @@ onMounted(async () => {
               </article>
             </div>
 
-            <ReportSummary
+            <EmptyStateCard
               v-else
-              :reports="familyReports"
-              empty-title="家属端暂无报告返回"
-              empty-description="当前老人还没有生成报告，可先补全画像或开始家属访谈。"
+              title="家属端暂无报告返回"
+              description="当前老人还没有生成报告，可先补全画像或开始家属访谈。"
             />
           </div>
         </section>
-
-        <section v-if="selectedReportId" class="surface-card report-detail-card">
-          <div class="reports-shell__header">
-            <h3>报告详情</h3>
-            <span>{{ reportDetailLoading ? '加载中' : selectedReportId }}</span>
-          </div>
-
-          <div v-if="reportDetailLoading" class="loading-card">正在加载报告详情...</div>
-          <ReportSummary
-            v-else
-            :reports="[normalizeReportRecord(selectedReportDetail || activeReport || {}) || {}]"
-            title="当前报告"
-            empty-title="报告详情为空"
-            empty-description="当前报告没有返回可展示的结构化内容。"
-          />
-        </section>
       </aside>
     </section>
+
+    <ReportDetailModal
+      v-if="selectedReportId"
+      :report-id="selectedReportId"
+      :report="selectedReportDetail || activeReport || null"
+      :loading="reportDetailLoading"
+      :downloading="downloadingReportId === selectedReportId"
+      empty-text="当前报告没有返回可展示的结构化内容。"
+      @close="closeReportModal"
+      @download="handleDownloadReport(selectedReportId)"
+    />
   </div>
 </template>
 
@@ -841,8 +840,7 @@ onMounted(async () => {
 
 .hint-card,
 .reports-shell,
-.interview-card,
-.report-detail-card {
+.interview-card {
   padding: 22px;
 }
 
@@ -971,8 +969,7 @@ onMounted(async () => {
   .detail-form-card,
   .hint-card,
   .reports-shell,
-  .interview-card,
-  .report-detail-card {
+  .interview-card {
     padding: 20px;
   }
 
