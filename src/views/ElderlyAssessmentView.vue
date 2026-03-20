@@ -14,7 +14,7 @@ import {
   startChat,
   streamChatMessage
 } from '@/api/chat'
-import { getElderlyProfile, getElderlyReportDetail, getElderlyReports } from '@/api/elderly'
+import { getElderlyProfile, getElderlyReportDetail } from '@/api/elderly'
 import { exportReportPdf, generateReport, streamGenerateReport } from '@/api/report'
 import ProfileOverview from '@/components/ProfileOverview.vue'
 import ReportSummary from '@/components/ReportSummary.vue'
@@ -61,13 +61,11 @@ const errorMessage = ref('')
 const copyIdButtonText = ref('复制我的号码')
 const reportGenerationText = ref('')
 const completionPercent = ref<number | null>(null)
-const completedGroups = ref<string[]>([])
-const pendingGroups = ref<string[]>([])
-const progressMissingFields = ref<Record<string, string[]>>({})
 const selectedReportId = ref('')
 const selectedReportDetail = ref<Record<string, unknown> | null>(null)
 const selectedReportLoading = ref(false)
 const downloadingReportId = ref('')
+const openingSessionReportId = ref('')
 
 const chatBodyRef = ref<HTMLElement | null>(null)
 
@@ -79,16 +77,15 @@ const activeReport = computed(() => {
 
   return reports.value.find((item) => getReportId(item) === selectedReportId.value) || null
 })
-const sortedReports = computed(() =>
-  [...reports.value].sort((left, right) =>
-    getReportGeneratedAt(right).localeCompare(getReportGeneratedAt(left))
-  )
-)
 const elderlyUserId = computed(() => elderlyAccessSession.value?.userId || '')
 const progressPercentLabel = computed(() =>
   completionPercent.value === null ? '未获取' : `${completionPercent.value}%`
 )
 const sessionStatusText = computed(() => {
+  return getConversationStateText(conversationState.value)
+})
+
+function getConversationStateText(value: string | undefined) {
   const map: Record<string, string> = {
     greeting: '开始评估',
     collecting: '信息采集中',
@@ -98,8 +95,8 @@ const sessionStatusText = computed(() => {
     follow_up: '报告后答疑'
   }
 
-  return map[conversationState.value] || '信息采集中'
-})
+  return map[value || ''] || '信息采集中'
+}
 
 const {
   isSupported: isGoogleVoiceSupported,
@@ -164,6 +161,12 @@ const voiceHintText = computed(() => {
 
 function cloneJson<T>(value: T) {
   return JSON.parse(JSON.stringify(value)) as T
+}
+
+function sortReportsByGeneratedAt(items: Array<Record<string, unknown>>) {
+  return [...items].sort((left, right) =>
+    getReportGeneratedAt(right).localeCompare(getReportGeneratedAt(left))
+  )
 }
 
 function getSessionCreatedAt(item: SessionMetadata) {
@@ -242,12 +245,6 @@ function updateCurrentSessionId(nextSessionId: string) {
   setStoredElderlySessionSessionId(nextSessionId)
 }
 
-function resetProgressGroups() {
-  completedGroups.value = []
-  pendingGroups.value = []
-  progressMissingFields.value = {}
-}
-
 function resolveSnapshotMetadata(targetSessionId = sessionId.value) {
   const existingMetadata =
     sessions.value.find((item) => item.session_id === targetSessionId) ||
@@ -303,7 +300,6 @@ function applyStoredSessionSnapshot(targetSessionId: string, message: string) {
   reports.value = cloneJson(snapshot.reports || [])
   conversationState.value = snapshot.conversationState || 'collecting'
   completionPercent.value = normalizeProgressPercent(snapshot.completionPercent)
-  resetProgressGroups()
   upsertSessionMetadata(snapshot.metadata)
 
   if (selectedReportId.value && !reports.value.some((item) => getReportId(item) === selectedReportId.value)) {
@@ -375,6 +371,14 @@ function getSessionLabel(item: SessionMetadata, index: number) {
   }
 
   return `历史评估 ${sessions.value.length - index}`
+}
+
+function hasSessionReport(item: SessionMetadata) {
+  return Boolean(item.has_report ?? item.hasReport)
+}
+
+function getLatestReportId(items: Array<Record<string, unknown>>) {
+  return getReportId(sortReportsByGeneratedAt(items)[0] || null)
 }
 
 async function copyElderlyUserId() {
@@ -469,22 +473,10 @@ async function refreshSessions(token: string) {
   }
 }
 
-async function refreshReportCollection(token: string) {
-  const response = await getElderlyReports(token)
-  reports.value = response
-
-  if (selectedReportId.value && !response.some((item) => getReportId(item) === selectedReportId.value)) {
-    resetSelectedReport()
-  }
-}
-
 async function refreshProgressState(targetSessionId: string, token: string) {
   const progress = await getChatProgress(targetSessionId, token)
   conversationState.value = progress.state || 'collecting'
   completionPercent.value = normalizeProgressPercent(progress.progress)
-  completedGroups.value = progress.completedGroups
-  pendingGroups.value = progress.pendingGroups
-  progressMissingFields.value = progress.missingFields
 }
 
 async function refreshSessionArtifacts(targetSessionId: string, token: string) {
@@ -497,6 +489,18 @@ async function refreshSessionArtifacts(targetSessionId: string, token: string) {
   const selfProfile = selfProfileResult.status === 'fulfilled' ? selfProfileResult.value : {}
 
   profile.value = mergeProfileSnapshots(selfProfile, profile.value || {}, latestProfile)
+}
+
+async function refreshCurrentSessionReports(targetSessionId: string, token: string) {
+  const detail = await getSessionDetail(targetSessionId, token)
+  reports.value = detail.reports || []
+
+  if (selectedReportId.value && !reports.value.some((item) => getReportId(item) === selectedReportId.value)) {
+    resetSelectedReport()
+  }
+
+  persistCurrentSnapshot(resolveSnapshotMetadata(targetSessionId))
+  return detail.reports || []
 }
 
 async function openReportDetail(reportId: string) {
@@ -553,13 +557,13 @@ async function loadExistingSession(targetSessionId: string, token: string) {
     await Promise.allSettled([
       refreshProgressState(targetSessionId, token).catch(() => {}),
       refreshSessionArtifacts(targetSessionId, token),
-      refreshReportCollection(token),
       refreshSessions(token)
     ])
     persistCurrentSnapshot(resolveSnapshotMetadata(targetSessionId))
+    return detail
   } catch (error) {
     if (applyStoredSessionSnapshot(targetSessionId, '后端会话加载失败，已恢复本机保存的会话内容。')) {
-      return
+      return null
     }
     throw error
   } finally {
@@ -586,7 +590,6 @@ async function createNewSession() {
       }
     ]
     completionPercent.value = null
-    resetProgressGroups()
     profile.value = {}
     reports.value = []
     conversationState.value = 'greeting'
@@ -594,8 +597,7 @@ async function createNewSession() {
 
     await Promise.allSettled([
       refreshSessions(response.accessToken),
-      refreshProgressState(response.sessionId, response.accessToken),
-      refreshReportCollection(response.accessToken)
+      refreshProgressState(response.sessionId, response.accessToken)
     ])
     persistCurrentSnapshot(resolveSnapshotMetadata(response.sessionId))
   } catch (error) {
@@ -698,8 +700,7 @@ async function handleSend() {
     await Promise.allSettled([
       refreshProgressState(sessionId.value, elderlyToken.value).catch(() => {}),
       refreshSessionArtifacts(sessionId.value, elderlyToken.value),
-      refreshSessions(elderlyToken.value),
-      refreshReportCollection(elderlyToken.value)
+      refreshSessions(elderlyToken.value)
     ])
     persistCurrentSnapshot()
   } catch (error) {
@@ -750,7 +751,7 @@ async function handleGenerateReport() {
     }
 
     await Promise.allSettled([
-      refreshReportCollection(elderlyToken.value),
+      refreshCurrentSessionReports(sessionId.value, elderlyToken.value),
       refreshSessionArtifacts(sessionId.value, elderlyToken.value),
       refreshSessions(elderlyToken.value),
       refreshProgressState(sessionId.value, elderlyToken.value).catch(() => {})
@@ -837,6 +838,37 @@ async function switchSession(targetSessionId: string) {
   }
 
   await loadExistingSession(targetSessionId, elderlyToken.value)
+}
+
+async function handleOpenSessionReport(item: SessionMetadata) {
+  if (!elderlyToken.value || !item.session_id || !hasSessionReport(item) || openingSessionReportId.value) {
+    return
+  }
+
+  openingSessionReportId.value = item.session_id
+  errorMessage.value = ''
+
+  try {
+    const targetReports =
+      item.session_id === sessionId.value
+        ? reports.value.length > 0
+          ? reports.value
+          : await refreshCurrentSessionReports(item.session_id, elderlyToken.value)
+        : (await loadExistingSession(item.session_id, elderlyToken.value))?.reports || []
+
+    const latestReportId = getLatestReportId(targetReports)
+    if (!latestReportId) {
+      errorMessage.value = '当前会话还没有可查看的报告。'
+      return
+    }
+
+    await openReportDetail(latestReportId)
+  } catch (error) {
+    errorMessage.value =
+      error instanceof Error ? error.message : '打开报告失败，请稍后重试。'
+  } finally {
+    openingSessionReportId.value = ''
+  }
 }
 
 async function toggleVoiceInput() {
@@ -958,7 +990,7 @@ onMounted(async () => {
           <p class="eyebrow">长者端</p>
           <h1>健康评估对话</h1>
           <p class="summary-card__text">
-            用对话和语音逐步采集老人健康信息，右侧同步查看状态、结构化画像和当前可用报告。
+            用自然对话逐步采集老人健康信息，右侧保留当前状态、历次会话与报告入口，减少干扰项。
           </p>
 
           <div class="summary-stats">
@@ -970,11 +1002,6 @@ onMounted(async () => {
               <span>关键信息完整度</span>
               <strong>{{ progressPercentLabel }}</strong>
             </div>
-          </div>
-
-          <div v-if="completedGroups.length > 0 || pendingGroups.length > 0" class="group-status">
-            <p v-if="completedGroups.length > 0">已完成：{{ completedGroups.join('、') }}</p>
-            <p v-if="pendingGroups.length > 0">待补充：{{ pendingGroups.join('、') }}</p>
           </div>
 
           <div class="summary-card__actions">
@@ -1005,62 +1032,68 @@ onMounted(async () => {
 
         <section class="surface-card session-card">
           <div class="panel-header">
-            <h3>我的会话</h3>
+            <div>
+              <h3>会话与报告</h3>
+              <p>每次评估会保留独立记录，并标记是否已经生成报告。</p>
+            </div>
             <span>{{ sessionsLoading ? '同步中' : `${sessions.length} 条` }}</span>
           </div>
 
           <div v-if="sessions.length > 0" class="session-list scroll-panel">
-            <button
+            <article
               v-for="(item, index) in sessions"
               :key="item.session_id"
               class="session-item"
               :class="{ 'is-active': item.session_id === sessionId }"
-              type="button"
-              @click="switchSession(item.session_id)"
             >
-              <strong>{{ getSessionLabel(item, index) }}</strong>
-              <span>{{ formatDateTime(item.created_at) }}</span>
-            </button>
+              <div class="session-item__head">
+                <div class="session-item__copy">
+                  <strong>{{ getSessionLabel(item, index) }}</strong>
+                  <span>{{ formatDateTime(item.created_at) }}</span>
+                </div>
+                <span class="session-item__marker">{{ item.session_id === sessionId ? '当前' : '历史' }}</span>
+              </div>
+
+              <div class="session-item__meta">
+                <span class="status-chip" :class="{ 'status-chip--active': item.session_id === sessionId }">
+                  {{ getConversationStateText(item.session_id === sessionId ? conversationState : item.status) }}
+                </span>
+                <span class="status-chip" :class="{ 'status-chip--ready': hasSessionReport(item) }">
+                  {{ hasSessionReport(item) ? '已生成报告' : '未生成报告' }}
+                </span>
+              </div>
+
+              <div class="session-item__actions">
+                <button
+                  class="secondary-button session-item__action"
+                  type="button"
+                  :disabled="loading || item.session_id === sessionId"
+                  @click="switchSession(item.session_id)"
+                >
+                  {{ item.session_id === sessionId ? '正在查看' : '查看对话' }}
+                </button>
+                <button
+                  v-if="hasSessionReport(item)"
+                  class="ghost-button session-item__action"
+                  type="button"
+                  :disabled="openingSessionReportId === item.session_id"
+                  @click="handleOpenSessionReport(item)"
+                >
+                  {{ openingSessionReportId === item.session_id ? '打开中...' : '查看报告' }}
+                </button>
+              </div>
+            </article>
           </div>
           <p v-else class="session-card__empty">当前还没有可恢复的历史会话。</p>
         </section>
 
         <ProfileOverview :profile="profile" />
-        <ReportSummary :reports="reports" />
-
-        <section class="surface-card report-list-card">
-          <div class="panel-header">
-            <h3>报告列表</h3>
-            <span>{{ sortedReports.length }} 份</span>
-          </div>
-
-          <div v-if="sortedReports.length > 0" class="report-list scroll-panel">
-            <article
-              v-for="report in sortedReports"
-              :key="getReportId(report) || JSON.stringify(report)"
-              class="report-item"
-            >
-              <div>
-                <strong>{{ getReportId(report) || '未命名报告' }}</strong>
-                <p>{{ formatDateTime(getReportGeneratedAt(report)) }}</p>
-              </div>
-              <div class="report-item__actions">
-                <button class="secondary-button" type="button" @click="openReportDetail(getReportId(report))">
-                  查看详情
-                </button>
-                <button
-                  class="ghost-button"
-                  type="button"
-                  :disabled="downloadingReportId === getReportId(report)"
-                  @click="handleDownloadReport(getReportId(report))"
-                >
-                  {{ downloadingReportId === getReportId(report) ? '导出中...' : '导出 PDF' }}
-                </button>
-              </div>
-            </article>
-          </div>
-          <p v-else class="session-card__empty">当前还没有返回任何报告。</p>
-        </section>
+        <ReportSummary
+          :reports="reports"
+          title="当前会话报告"
+          empty-title="当前会话尚无报告"
+          empty-description="完成对话采集后可直接生成报告，报告入口也会同步出现在上方会话列表中。"
+        />
 
         <section v-if="generatingReport && reportGenerationText" class="surface-card stream-card">
           <div class="panel-header">
@@ -1071,8 +1104,18 @@ onMounted(async () => {
 
         <section v-if="selectedReportId" class="surface-card report-detail-card">
           <div class="panel-header">
-            <h3>报告详情</h3>
-            <span>{{ selectedReportLoading ? '加载中' : selectedReportId }}</span>
+            <div>
+              <h3>报告详情</h3>
+              <p>{{ selectedReportLoading ? '正在同步当前报告内容' : selectedReportId }}</p>
+            </div>
+            <button
+              class="ghost-button report-detail-card__download"
+              type="button"
+              :disabled="selectedReportLoading || downloadingReportId === selectedReportId"
+              @click="handleDownloadReport(selectedReportId)"
+            >
+              {{ downloadingReportId === selectedReportId ? '导出中...' : '导出 PDF' }}
+            </button>
           </div>
 
           <div v-if="selectedReportLoading" class="session-card__empty">正在加载报告详情...</div>
@@ -1275,7 +1318,6 @@ onMounted(async () => {
 
 .summary-card,
 .session-card,
-.report-list-card,
 .stream-card,
 .report-detail-card {
   padding: 22px;
@@ -1308,9 +1350,6 @@ onMounted(async () => {
 }
 
 .summary-stat span,
-.group-status p,
-.report-item p,
-.session-item span,
 .session-card__empty {
   color: var(--ink-muted);
 }
@@ -1320,17 +1359,6 @@ onMounted(async () => {
   margin-top: 8px;
   color: var(--ink-strong);
   font-size: 1.35rem;
-}
-
-.group-status {
-  margin-top: 14px;
-  display: grid;
-  gap: 8px;
-}
-
-.group-status p {
-  margin: 0;
-  line-height: 1.7;
 }
 
 .summary-card__actions {
@@ -1348,7 +1376,7 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  align-items: baseline;
+  align-items: flex-start;
 }
 
 .panel-header h3 {
@@ -1356,56 +1384,96 @@ onMounted(async () => {
   color: var(--ink-strong);
 }
 
+.panel-header p,
 .panel-header span {
+  margin: 6px 0 0;
   color: var(--ink-muted);
 }
 
-.session-list,
-.report-list {
+.session-list {
   margin-top: 16px;
   display: grid;
-  gap: 12px;
-  max-height: 18rem;
+  gap: 14px;
+  max-height: 24rem;
   overflow: auto;
 }
 
-.session-item,
-.report-item {
-  padding: 14px 16px;
-  border-radius: 18px;
+.session-item {
+  padding: 16px;
+  border-radius: 22px;
   border: 1px solid rgba(83, 169, 183, 0.12);
   background: rgba(255, 255, 255, 0.84);
-}
-
-.session-item {
   display: grid;
-  gap: 6px;
-  text-align: left;
+  gap: 14px;
 }
 
-.session-item strong,
-.report-item strong {
+.session-item strong {
   color: var(--ink-strong);
 }
 
 .session-item.is-active {
   border-color: rgba(43, 134, 150, 0.32);
   background: rgba(83, 169, 183, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(43, 134, 150, 0.06);
 }
 
-.report-item {
-  display: grid;
+.session-item__head,
+.session-item__actions {
+  display: flex;
+  justify-content: space-between;
   gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
-.report-item p {
-  margin: 6px 0 0;
+.session-item__copy {
+  display: grid;
+  gap: 6px;
 }
 
-.report-item__actions {
+.session-item__copy span {
+  color: var(--ink-muted);
+}
+
+.session-item__marker {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(83, 169, 183, 0.12);
+  color: var(--brand-strong);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.session-item__meta {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(239, 246, 251, 0.96);
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+}
+
+.status-chip--active {
+  background: rgba(83, 169, 183, 0.14);
+  color: var(--brand-strong);
+}
+
+.status-chip--ready {
+  background: rgba(71, 162, 135, 0.12);
+  color: #2f7b63;
+}
+
+.session-item__action,
+.report-detail-card__download {
+  min-width: 6.75rem;
 }
 
 .stream-card__content {
@@ -1449,6 +1517,15 @@ onMounted(async () => {
 
   .chat-card__header-actions p {
     text-align: left;
+  }
+
+  .session-item__actions {
+    align-items: stretch;
+  }
+
+  .session-item__action,
+  .report-detail-card__download {
+    width: 100%;
   }
 }
 </style>
