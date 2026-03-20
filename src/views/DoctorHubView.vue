@@ -181,6 +181,18 @@ function parseRecommendations(rawValue: string) {
     .filter(Boolean)
 }
 
+function getDoctorErrorMessage(error: unknown, fallback: string) {
+  if (!(error instanceof Error)) {
+    return fallback
+  }
+
+  if (error.message.includes('The string did not match the expected pattern.')) {
+    return fallback
+  }
+
+  return error.message || fallback
+}
+
 function resetFollowupForm() {
   followupForm.visitType = '电话'
   followupForm.findings = ''
@@ -227,8 +239,7 @@ async function openReportDetail(reportId: string) {
   try {
     selectedReportDetail.value = await getReportDetail(reportId, doctorToken.value)
   } catch (error) {
-    errorMessage.value =
-      error instanceof Error ? error.message : '加载报告详情失败，请稍后重试。'
+    errorMessage.value = getDoctorErrorMessage(error, '加载报告详情失败，请稍后重试。')
   } finally {
     reportDetailLoading.value = false
   }
@@ -258,8 +269,7 @@ async function selectElderly(elderlyId: string) {
 
     await loadLatestConversation(detail.sessions[0]?.session_id || '')
   } catch (error) {
-    errorMessage.value =
-      error instanceof Error ? error.message : '加载老人详情失败，请稍后重试。'
+    errorMessage.value = getDoctorErrorMessage(error, '加载老人详情失败，请稍后重试。')
     selectedDetail.value = null
     latestConversation.value = []
   } finally {
@@ -296,8 +306,7 @@ async function loadElderlyList() {
 
     await selectElderly(nextElderlyId)
   } catch (error) {
-    errorMessage.value =
-      error instanceof Error ? error.message : '加载老人总览失败，请稍后重试。'
+    errorMessage.value = getDoctorErrorMessage(error, '加载老人总览失败，请稍后重试。')
   } finally {
     loading.value = false
   }
@@ -325,8 +334,7 @@ async function saveManagement() {
     successMessage.value = '管理状态已更新。'
     await loadElderlyList()
   } catch (error) {
-    errorMessage.value =
-      error instanceof Error ? error.message : '更新管理状态失败，请稍后重试。'
+    errorMessage.value = getDoctorErrorMessage(error, '更新管理状态失败，请稍后重试。')
   } finally {
     managementSaving.value = false
   }
@@ -362,8 +370,7 @@ async function submitFollowup() {
     successMessage.value = '随访记录已保存。'
     await loadElderlyList()
   } catch (error) {
-    errorMessage.value =
-      error instanceof Error ? error.message : '保存随访记录失败，请稍后重试。'
+    errorMessage.value = getDoctorErrorMessage(error, '保存随访记录失败，请稍后重试。')
   } finally {
     followupSaving.value = false
   }
@@ -389,8 +396,7 @@ async function handleDownloadReport(reportId: string) {
     if (error instanceof ApiError && error.status === 501) {
       errorMessage.value = '后端尚未实现 PDF 导出，目前仅支持在线查看报告。'
     } else {
-      errorMessage.value =
-        error instanceof Error ? error.message : '导出 PDF 失败，请稍后重试。'
+      errorMessage.value = getDoctorErrorMessage(error, '导出 PDF 失败，请稍后重试。')
     }
   } finally {
     downloadingReportId.value = ''
