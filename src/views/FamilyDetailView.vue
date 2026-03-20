@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { saveSessionProfile } from '@/api/chat'
+import { getSessionDetail } from '@/api/chat'
 import { ApiError } from '@/api/core'
 import {
   getFamilyElderly,
@@ -17,8 +18,11 @@ import EmptyStateCard from '@/components/EmptyStateCard.vue'
 import ProfileOverview from '@/components/ProfileOverview.vue'
 import ReportSummary from '@/components/ReportSummary.vue'
 import {
+  clearStoredFamilyConversationSnapshot,
   clearStoredFamilyConversationSessionId,
+  getStoredFamilyConversationSnapshot,
   getStoredFamilyConversationSessionId,
+  setStoredFamilyConversationSnapshot,
   setStoredFamilyConversationSessionId,
   useAuthSession
 } from '@/session'
@@ -27,6 +31,7 @@ import {
   cloneProfileForForm,
   getIdentityTitle,
   getMissingCoreFields,
+  PROFILE_FIELD_LABELS,
   PROFILE_FIELDS,
   PROFILE_GROUPS,
   serializeProfilePayload
@@ -55,6 +60,9 @@ const selectedReportId = ref('')
 const selectedReportDetail = ref<Record<string, unknown> | null>(null)
 const familySessionId = ref('')
 const familySessionState = ref('')
+const familySessionProgress = ref<number | null>(null)
+const familyCollectedFields = ref<string[]>([])
+const familyMissingFields = ref<string[]>([])
 const familyMessages = ref<ChatMessage[]>([])
 const familyInput = ref('')
 const profileForm = reactive<Record<string, unknown>>({})
@@ -82,13 +90,34 @@ const activeReport = computed(() => {
 })
 const familySessionStatusText = computed(() => {
   const map: Record<string, string> = {
-    collecting: '信息采集中',
-    confirming: '待确认',
-    completed: '访谈已完成'
+    GREETING: '待开始访谈',
+    COLLECTING: '信息采集中',
+    CONFIRMING: '待确认',
+    GENERATING: '正在生成',
+    COMPLETED: '访谈已完成'
   }
 
-  return map[familySessionState.value] || (familySessionId.value ? '访谈已创建' : '尚未开始')
+  return map[familySessionState.value.trim().toUpperCase()] || (familySessionId.value ? '访谈已创建' : '尚未开始')
 })
+const familySessionProgressText = computed(() => {
+  if (familySessionProgress.value === null) {
+    return familySessionId.value ? '进行中' : '未开始'
+  }
+
+  return `${familySessionProgress.value}%`
+})
+const familyMissingFieldLabels = computed(() =>
+  familyMissingFields.value.map((field) => PROFILE_FIELD_LABELS[field] || field)
+)
+
+function normalizeProgressPercent(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return null
+  }
+
+  const normalizedValue = value <= 1 ? value * 100 : value
+  return Math.max(0, Math.min(100, Math.round(normalizedValue)))
+}
 
 function formatDateTime(value: string) {
   if (!value) {
@@ -119,10 +148,75 @@ function resetMessages() {
   successMessage.value = ''
 }
 
+function applyProfileForm(profile: Record<string, unknown> | null | undefined) {
+  const clonedProfile = cloneProfileForForm(profile || {})
+
+  for (const key of Object.keys(profileForm)) {
+    delete profileForm[key]
+  }
+
+  Object.assign(profileForm, clonedProfile)
+}
+
+function appendAssistantMessage(content: string | undefined) {
+  const normalizedContent = content?.trim()
+  if (!normalizedContent) {
+    return
+  }
+
+  const lastMessage = familyMessages.value[familyMessages.value.length - 1]
+  if (lastMessage?.role === 'assistant' && lastMessage.content === normalizedContent) {
+    return
+  }
+
+  familyMessages.value = [
+    ...familyMessages.value,
+    {
+      role: 'assistant',
+      content: normalizedContent
+    }
+  ]
+}
+
+function persistFamilyConversationSnapshot() {
+  if (!familySessionId.value) {
+    clearStoredFamilyConversationSnapshot(props.elderlyId)
+    return
+  }
+
+  setStoredFamilyConversationSnapshot(props.elderlyId, {
+    sessionId: familySessionId.value,
+    messages: familyMessages.value,
+    state: familySessionState.value || undefined,
+    collectedFields: familyCollectedFields.value,
+    missingFields: familyMissingFields.value
+  })
+}
+
+function resetFamilySession(shouldClearStorage = false) {
+  familySessionId.value = ''
+  familySessionState.value = ''
+  familySessionProgress.value = null
+  familyCollectedFields.value = []
+  familyMissingFields.value = []
+  familyMessages.value = []
+
+  if (shouldClearStorage) {
+    clearStoredFamilyConversationSessionId(props.elderlyId)
+  } else {
+    clearStoredFamilyConversationSnapshot(props.elderlyId)
+  }
+}
+
 function applyFamilySessionState(payload: {
   sessionId: string
+  greeting?: string
+  reply?: string
   message?: string
   state?: string
+  progress?: number
+  collectedFields?: string[]
+  missingFields?: string[]
   conversation?: ChatMessage[]
   profile?: Record<string, unknown> | null
   reports?: Array<Record<string, unknown>>
@@ -136,29 +230,33 @@ function applyFamilySessionState(payload: {
     familySessionState.value = payload.state
   }
 
+  if (payload.progress !== undefined) {
+    familySessionProgress.value = normalizeProgressPercent(payload.progress)
+  }
+
+  if (payload.collectedFields) {
+    familyCollectedFields.value = payload.collectedFields
+  }
+
+  if (payload.missingFields) {
+    familyMissingFields.value = payload.missingFields
+  }
+
   if (payload.conversation && payload.conversation.length > 0) {
     familyMessages.value = payload.conversation
-  } else if (payload.message) {
-    familyMessages.value = [
-      ...familyMessages.value,
-      {
-        role: 'assistant',
-        content: payload.message
-      }
-    ]
+  } else {
+    appendAssistantMessage(payload.greeting || payload.reply || payload.message)
   }
 
   if (payload.profile) {
-    const clonedProfile = cloneProfileForForm(payload.profile)
-    for (const key of Object.keys(profileForm)) {
-      delete profileForm[key]
-    }
-    Object.assign(profileForm, clonedProfile)
+    applyProfileForm(payload.profile)
   }
 
   if (payload.reports && payload.reports.length > 0) {
     familyReports.value = payload.reports
   }
+
+  persistFamilyConversationSnapshot()
 }
 
 async function loadProfileDetail() {
@@ -172,13 +270,7 @@ async function loadProfileDetail() {
 
   try {
     const detail = await getFamilyElderly(props.elderlyId, session.value.token)
-    const clonedProfile = cloneProfileForForm(detail.profile || {})
-
-    for (const key of Object.keys(profileForm)) {
-      delete profileForm[key]
-    }
-
-    Object.assign(profileForm, clonedProfile)
+    applyProfileForm(detail.profile)
   } catch (error) {
     errorMessage.value =
       error instanceof Error ? error.message : '加载老人画像失败，请稍后重试。'
@@ -230,6 +322,32 @@ async function openReportDetail(reportId: string) {
   }
 }
 
+async function loadFamilySessionWorkspace(targetSessionId: string) {
+  if (!session.value?.token || session.value.role !== 'family') {
+    return
+  }
+
+  try {
+    const detail = await getSessionDetail(targetSessionId, session.value.token)
+
+    if (detail.conversation && detail.conversation.length > 0) {
+      familyMessages.value = detail.conversation
+    }
+
+    if (detail.profile && Object.keys(detail.profile).length > 0) {
+      applyProfileForm(detail.profile)
+    }
+
+    if (detail.reports && detail.reports.length > 0) {
+      familyReports.value = detail.reports
+    }
+  } catch {
+    // Family sessions do not always persist a workspace conversation file.
+  } finally {
+    persistFamilyConversationSnapshot()
+  }
+}
+
 async function loadStoredFamilySession() {
   if (!session.value?.token || session.value.role !== 'family') {
     return
@@ -237,23 +355,31 @@ async function loadStoredFamilySession() {
 
   const storedSessionId = getStoredFamilyConversationSessionId(props.elderlyId)
   if (!storedSessionId) {
-    familyMessages.value = []
-    familySessionId.value = ''
-    familySessionState.value = ''
+    resetFamilySession()
     return
+  }
+
+  familySessionId.value = storedSessionId
+
+  const storedSnapshot = getStoredFamilyConversationSnapshot(props.elderlyId)
+  if (storedSnapshot?.sessionId === storedSessionId) {
+    familyMessages.value = storedSnapshot.messages
+    familySessionState.value = storedSnapshot.state || familySessionState.value
+    familyCollectedFields.value = storedSnapshot.collectedFields || []
+    familyMissingFields.value = storedSnapshot.missingFields || []
   }
 
   familySessionLoading.value = true
 
   try {
-    const response = await getFamilySessionInfo(storedSessionId, session.value.token)
+    const [response] = await Promise.all([
+      getFamilySessionInfo(storedSessionId, session.value.token),
+      loadFamilySessionWorkspace(storedSessionId)
+    ])
     applyFamilySessionState(response)
   } catch (error) {
     if (isSessionUnavailable(error)) {
-      clearStoredFamilyConversationSessionId(props.elderlyId)
-      familySessionId.value = ''
-      familySessionState.value = ''
-      familyMessages.value = []
+      resetFamilySession(true)
       return
     }
 
@@ -274,7 +400,7 @@ async function startInterviewSession() {
   errorMessage.value = ''
 
   try {
-    familyMessages.value = []
+    resetFamilySession()
     const response = await startFamilySession(props.elderlyId, session.value.token)
     applyFamilySessionState(response)
     await Promise.all([loadReports(), loadProfileDetail()])
@@ -315,6 +441,7 @@ async function sendInterviewMessage() {
       content: messageText
     }
   ]
+  persistFamilyConversationSnapshot()
 
   try {
     const response = await sendFamilySessionMessage(familySessionId.value, session.value.token, messageText)
@@ -322,9 +449,7 @@ async function sendInterviewMessage() {
     await Promise.all([loadReports(), loadProfileDetail()])
   } catch (error) {
     if (isSessionUnavailable(error)) {
-      clearStoredFamilyConversationSessionId(props.elderlyId)
-      familySessionId.value = ''
-      familySessionState.value = ''
+      resetFamilySession(true)
     }
     errorMessage.value =
       error instanceof Error ? error.message : '发送访谈消息失败，请稍后重试。'
@@ -353,9 +478,7 @@ async function saveProfile() {
         workspaceSynced = true
       } catch (error) {
         if (isSessionUnavailable(error)) {
-          clearStoredFamilyConversationSessionId(props.elderlyId)
-          familySessionId.value = ''
-          familySessionState.value = ''
+          resetFamilySession(true)
         }
       }
     }
@@ -510,7 +633,7 @@ onMounted(async () => {
         <section class="surface-card interview-card">
           <header class="reports-shell__header">
             <h3>家属访谈</h3>
-            <span>{{ familySessionStatusText }}</span>
+            <span>{{ familySessionStatusText }} · {{ familySessionProgressText }}</span>
           </header>
 
           <div class="interview-actions">
@@ -518,6 +641,10 @@ onMounted(async () => {
               {{ familySessionLoading ? '启动中...' : familySessionId ? '重新开始访谈' : '开始家属访谈' }}
             </button>
             <p v-if="familySessionId" class="interview-meta">当前会话：{{ familySessionId }}</p>
+          </div>
+
+          <div v-if="familyMissingFieldLabels.length > 0" class="hint-chip-list interview-chip-list">
+            <span v-for="field in familyMissingFieldLabels" :key="field" class="hint-chip">{{ field }}</span>
           </div>
 
           <div v-if="familyMessages.length > 0" class="conversation-list scroll-panel">
@@ -806,6 +933,10 @@ onMounted(async () => {
 
 .interview-actions {
   margin-top: 16px;
+}
+
+.interview-chip-list {
+  margin-top: 12px;
 }
 
 .conversation-item strong {

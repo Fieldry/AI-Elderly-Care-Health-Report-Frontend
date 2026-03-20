@@ -1,9 +1,18 @@
 import { computed, reactive } from 'vue'
 
-import type { AuthSession, FamilyAuthSession, Role } from '@/types'
+import type { AuthSession, ChatMessage, FamilyAuthSession, Role } from '@/types'
 
 const STORAGE_KEY = 'ai-elderly-care.session'
 const FAMILY_SESSION_MAP_KEY = 'ai-elderly-care.family-session-map'
+const FAMILY_CONVERSATION_SNAPSHOT_KEY = 'ai-elderly-care.family-conversation-snapshots'
+
+interface FamilyConversationSnapshot {
+  sessionId: string
+  messages: ChatMessage[]
+  state?: string
+  collectedFields?: string[]
+  missingFields?: string[]
+}
 
 function isRole(value: unknown): value is Role {
   return value === 'elderly' || value === 'family' || value === 'doctor'
@@ -104,6 +113,82 @@ function writeFamilySessionMap(nextMap: Record<string, string>) {
   window.localStorage.setItem(FAMILY_SESSION_MAP_KEY, JSON.stringify(nextMap))
 }
 
+function normalizeChatMessage(raw: unknown): ChatMessage | null {
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+
+  const record = raw as Record<string, unknown>
+  const content = typeof record.content === 'string' ? record.content : ''
+  if (!content.trim()) {
+    return null
+  }
+
+  const role = record.role === 'assistant' || record.role === 'system' ? record.role : 'user'
+  return {
+    role,
+    content,
+    timestamp: typeof record.timestamp === 'string' ? record.timestamp : undefined
+  }
+}
+
+function normalizeFamilyConversationSnapshot(raw: unknown): FamilyConversationSnapshot | null {
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+
+  const record = raw as Record<string, unknown>
+  const sessionId = typeof record.sessionId === 'string' ? record.sessionId : ''
+  if (!sessionId) {
+    return null
+  }
+
+  return {
+    sessionId,
+    messages: Array.isArray(record.messages)
+      ? record.messages.map(normalizeChatMessage).filter(Boolean) as ChatMessage[]
+      : [],
+    state: typeof record.state === 'string' ? record.state : undefined,
+    collectedFields: Array.isArray(record.collectedFields)
+      ? record.collectedFields.filter((item): item is string => typeof item === 'string')
+      : [],
+    missingFields: Array.isArray(record.missingFields)
+      ? record.missingFields.filter((item): item is string => typeof item === 'string')
+      : []
+  }
+}
+
+function readFamilyConversationSnapshots() {
+  if (typeof window === 'undefined') {
+    return {} as Record<string, FamilyConversationSnapshot>
+  }
+
+  const raw = window.localStorage.getItem(FAMILY_CONVERSATION_SNAPSHOT_KEY)
+  if (!raw) {
+    return {} as Record<string, FamilyConversationSnapshot>
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .map(([elderlyId, snapshot]) => [elderlyId, normalizeFamilyConversationSnapshot(snapshot)] as const)
+        .filter((entry): entry is [string, FamilyConversationSnapshot] => !!entry[1])
+    )
+  } catch {
+    window.localStorage.removeItem(FAMILY_CONVERSATION_SNAPSHOT_KEY)
+    return {} as Record<string, FamilyConversationSnapshot>
+  }
+}
+
+function writeFamilyConversationSnapshots(nextSnapshots: Record<string, FamilyConversationSnapshot>) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.setItem(FAMILY_CONVERSATION_SNAPSHOT_KEY, JSON.stringify(nextSnapshots))
+}
+
 function readSession(): AuthSession | null {
   if (typeof window === 'undefined') {
     return null
@@ -124,7 +209,8 @@ function readSession(): AuthSession | null {
 
 const state = reactive({
   session: readSession(),
-  familySessionMap: readFamilySessionMap()
+  familySessionMap: readFamilySessionMap(),
+  familyConversationSnapshots: readFamilyConversationSnapshots()
 })
 
 export function getStoredSession() {
@@ -187,6 +273,10 @@ export function getStoredFamilyConversationSessionId(elderlyId: string) {
   return state.familySessionMap[elderlyId] || ''
 }
 
+export function getStoredFamilyConversationSnapshot(elderlyId: string) {
+  return state.familyConversationSnapshots[elderlyId] || null
+}
+
 export function setStoredFamilyConversationSessionId(elderlyId: string, sessionId: string) {
   state.familySessionMap = {
     ...state.familySessionMap,
@@ -197,6 +287,7 @@ export function setStoredFamilyConversationSessionId(elderlyId: string, sessionI
 
 export function clearStoredFamilyConversationSessionId(elderlyId: string) {
   if (!state.familySessionMap[elderlyId]) {
+    clearStoredFamilyConversationSnapshot(elderlyId)
     return
   }
 
@@ -204,13 +295,41 @@ export function clearStoredFamilyConversationSessionId(elderlyId: string) {
   delete nextMap[elderlyId]
   state.familySessionMap = nextMap
   writeFamilySessionMap(nextMap)
+  clearStoredFamilyConversationSnapshot(elderlyId)
 }
 
 export function clearStoredFamilyConversationSessions() {
   state.familySessionMap = {}
+  state.familyConversationSnapshots = {}
   if (typeof window !== 'undefined') {
     window.localStorage.removeItem(FAMILY_SESSION_MAP_KEY)
+    window.localStorage.removeItem(FAMILY_CONVERSATION_SNAPSHOT_KEY)
   }
+}
+
+export function setStoredFamilyConversationSnapshot(elderlyId: string, snapshot: FamilyConversationSnapshot) {
+  state.familyConversationSnapshots = {
+    ...state.familyConversationSnapshots,
+    [elderlyId]: {
+      sessionId: snapshot.sessionId,
+      messages: snapshot.messages,
+      state: snapshot.state,
+      collectedFields: snapshot.collectedFields || [],
+      missingFields: snapshot.missingFields || []
+    }
+  }
+  writeFamilyConversationSnapshots(state.familyConversationSnapshots)
+}
+
+export function clearStoredFamilyConversationSnapshot(elderlyId: string) {
+  if (!state.familyConversationSnapshots[elderlyId]) {
+    return
+  }
+
+  const nextSnapshots = { ...state.familyConversationSnapshots }
+  delete nextSnapshots[elderlyId]
+  state.familyConversationSnapshots = nextSnapshots
+  writeFamilyConversationSnapshots(nextSnapshots)
 }
 
 export function updateStoredFamilyElderlyIds(elderlyIds: string[]) {
