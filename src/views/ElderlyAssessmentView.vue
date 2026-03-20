@@ -22,7 +22,6 @@ import { useGoogleStreamingSpeech } from '@/composables/useGoogleStreamingSpeech
 import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
 import { clearStoredSession, setStoredElderlySessionSessionId, setStoredSession, useAuthSession } from '@/session'
 import type { ChatMessage, ChatMessageResponse, ChatStartResponse, SessionMetadata } from '@/types'
-import { PROFILE_FIELD_LABELS, getMissingCoreFields } from '@/utils/profile'
 import { getReportGeneratedAt, getReportId, normalizeReportRecord } from '@/utils/report'
 import { mergeProfileSnapshots } from '@/utils/report'
 
@@ -42,6 +41,7 @@ const deleting = ref(false)
 const generatingReport = ref(false)
 const conversationState = ref('greeting')
 const errorMessage = ref('')
+const copyIdButtonText = ref('复制我的绑定 ID')
 const reportGenerationText = ref('')
 const completionPercent = ref<number | null>(null)
 const completedGroups = ref<string[]>([])
@@ -69,16 +69,12 @@ const sortedReports = computed(() =>
     getReportGeneratedAt(right).localeCompare(getReportGeneratedAt(left))
   )
 )
+const elderlyUserId = computed(() =>
+  session.value?.role === 'elderly' ? session.value.userId : ''
+)
 const progressPercentLabel = computed(() =>
   completionPercent.value === null ? '未获取' : `${completionPercent.value}%`
 )
-const missingFieldLabels = computed(() => {
-  const backendFields = Object.values(progressMissingFields.value)
-    .flat()
-    .map((field) => PROFILE_FIELD_LABELS[field] || field)
-  const fallbackFields = getMissingCoreFields(profile.value)
-  return Array.from(new Set([...(backendFields.length > 0 ? backendFields : []), ...fallbackFields]))
-})
 const sessionStatusText = computed(() => {
   const map: Record<string, string> = {
     greeting: '开始评估',
@@ -90,13 +86,6 @@ const sessionStatusText = computed(() => {
   }
 
   return map[conversationState.value] || '信息采集中'
-})
-const sessionTitle = computed(() => {
-  if (!sessionId.value) {
-    return '会话准备中'
-  }
-
-  return `会话 ${sessionId.value.slice(0, 8)}`
 })
 
 const {
@@ -136,10 +125,10 @@ const isVoiceActive = computed(
 )
 const voiceButtonLabel = computed(() => {
   if (isGoogleVoiceConnecting.value) {
-    return '连接语音中...'
+    return '连接中'
   }
 
-  return isVoiceActive.value ? '停止语音输入' : '语音输入'
+  return isVoiceActive.value ? '停止' : '语音'
 })
 const voiceHintText = computed(() => {
   if (!isVoiceAvailable.value) {
@@ -196,6 +185,48 @@ function isForbidden(error: unknown) {
 function clearVoiceInput() {
   abortGoogleVoiceRecognition()
   abortBrowserVoiceRecognition()
+}
+
+function getSessionLabel(item: SessionMetadata, index: number) {
+  if (item.title?.trim()) {
+    return item.title
+  }
+
+  return `历史评估 ${sessions.value.length - index}`
+}
+
+async function copyElderlyUserId() {
+  if (!elderlyUserId.value) {
+    copyIdButtonText.value = 'ID 未就绪'
+    window.setTimeout(() => {
+      copyIdButtonText.value = '复制我的绑定 ID'
+    }, 1600)
+    return
+  }
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(elderlyUserId.value)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = elderlyUserId.value
+      textarea.setAttribute('readonly', 'true')
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+    }
+
+    copyIdButtonText.value = '已复制'
+  } catch {
+    copyIdButtonText.value = '复制失败'
+  }
+
+  window.setTimeout(() => {
+    copyIdButtonText.value = '复制我的绑定 ID'
+  }, 1800)
 }
 
 function applyStartedSession(response: ChatStartResponse) {
@@ -615,7 +646,17 @@ onMounted(async () => {
             <h2>对话采集</h2>
             <p>请直接描述您的身体情况、慢病、生活能力和日常习惯。</p>
           </div>
-          <span class="status-badge">{{ sessionTitle }}</span>
+          <div class="chat-card__header-actions">
+            <p>这是您的专属绑定 ID，可复制后提供给家属绑定。</p>
+            <button
+              class="secondary-button copy-id-button"
+              type="button"
+              :disabled="!elderlyUserId"
+              @click="copyElderlyUserId"
+            >
+              {{ copyIdButtonText }}
+            </button>
+          </div>
         </header>
 
         <p v-if="errorMessage" class="error-banner">{{ errorMessage }}</p>
@@ -658,6 +699,7 @@ onMounted(async () => {
                 :disabled="loading || !isVoiceAvailable"
                 @click="toggleVoiceInput"
               >
+                <span class="voice-button__dot" :class="{ 'is-live': isVoiceActive }" />
                 {{ voiceButtonLabel }}
               </button>
               <p>{{ voiceErrorMessage || voiceHintText }}</p>
@@ -727,25 +769,18 @@ onMounted(async () => {
 
           <div v-if="sessions.length > 0" class="session-list scroll-panel">
             <button
-              v-for="item in sessions"
+              v-for="(item, index) in sessions"
               :key="item.session_id"
               class="session-item"
               :class="{ 'is-active': item.session_id === sessionId }"
               type="button"
               @click="switchSession(item.session_id)"
             >
-              <strong>{{ item.title || `会话 ${item.session_id.slice(0, 8)}` }}</strong>
+              <strong>{{ getSessionLabel(item, index) }}</strong>
               <span>{{ formatDateTime(item.created_at) }}</span>
             </button>
           </div>
           <p v-else class="session-card__empty">当前还没有可恢复的历史会话。</p>
-        </section>
-
-        <section v-if="missingFieldLabels.length > 0" class="surface-card hint-card">
-          <h3>建议继续补充</h3>
-          <div class="hint-chip-list">
-            <span v-for="field in missingFieldLabels" :key="field" class="hint-chip">{{ field }}</span>
-          </div>
         </section>
 
         <ProfileOverview :profile="profile" />
@@ -838,6 +873,13 @@ onMounted(async () => {
   align-items: flex-start;
 }
 
+.chat-card__header-actions {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+  max-width: 17rem;
+}
+
 .chat-card__header h2 {
   margin: 0;
   color: var(--ink-strong);
@@ -850,13 +892,18 @@ onMounted(async () => {
   font-size: 1.05rem;
 }
 
-.status-badge {
-  padding: 10px 14px;
+.chat-card__header-actions p {
+  margin: 0;
+  color: var(--ink-muted);
+  line-height: 1.6;
+  text-align: right;
+  font-size: 0.95rem;
+}
+
+.copy-id-button {
+  min-width: 9.5rem;
+  min-height: 2.75rem;
   border-radius: 999px;
-  background: var(--brand-soft);
-  color: var(--brand-strong);
-  white-space: nowrap;
-  font-weight: 700;
 }
 
 .error-banner {
@@ -949,6 +996,30 @@ onMounted(async () => {
 .voice-panel p {
   margin: 0;
   line-height: 1.7;
+}
+
+.voice-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 5.5rem;
+  min-height: 2.75rem;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.voice-button__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(83, 169, 183, 0.3);
+}
+
+.voice-button__dot.is-live {
+  background: var(--brand-strong);
+  box-shadow: 0 0 0 6px rgba(83, 169, 183, 0.16);
 }
 
 .composer-submit {
@@ -1080,29 +1151,6 @@ onMounted(async () => {
   background: rgba(83, 169, 183, 0.12);
 }
 
-.hint-card {
-  padding: 22px;
-}
-
-.hint-card h3 {
-  margin: 0 0 14px;
-  color: var(--ink-strong);
-}
-
-.hint-chip-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.hint-chip {
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: rgba(83, 169, 183, 0.12);
-  color: var(--brand-strong);
-  font-weight: 700;
-}
-
 .report-item {
   display: grid;
   gap: 12px;
@@ -1146,9 +1194,19 @@ onMounted(async () => {
     grid-template-columns: 1fr;
   }
 
+  .chat-card__header,
   .composer-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .chat-card__header-actions {
+    justify-items: stretch;
+    max-width: none;
+  }
+
+  .chat-card__header-actions p {
+    text-align: left;
   }
 }
 </style>
