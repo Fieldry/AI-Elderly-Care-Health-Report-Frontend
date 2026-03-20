@@ -12,11 +12,11 @@ import {
 import { exportReportPdf, getReportDetail } from '@/api/report'
 import EmptyStateCard from '@/components/EmptyStateCard.vue'
 import ProfileOverview from '@/components/ProfileOverview.vue'
-import ReportSummary from '@/components/ReportSummary.vue'
+import ReportDetailModal from '@/components/ReportDetailModal.vue'
 import { useAuthSession } from '@/session'
 import type { ChatMessage, DoctorElderlyDetail, DoctorElderlySummary } from '@/types'
 import { getIdentityTitle } from '@/utils/profile'
-import { getReportGeneratedAt, getReportId, normalizeReportRecord } from '@/utils/report'
+import { getReportGeneratedAt, getReportId } from '@/utils/report'
 
 const managementStatusOptions = [
   { value: 'normal', label: '常规管理' },
@@ -202,6 +202,11 @@ function resetFollowupForm() {
   followupForm.referred = false
   followupForm.nextFollowupAt = ''
   followupForm.notes = ''
+}
+
+function closeReportModal() {
+  selectedReportId.value = ''
+  selectedReportDetail.value = null
 }
 
 function applyManagementForm(detail: DoctorElderlyDetail) {
@@ -553,13 +558,6 @@ onMounted(async () => {
 
           <ProfileOverview :profile="selectedDetail.profile" title="患者画像" />
 
-          <ReportSummary
-            :reports="selectedDetail.reports"
-            title="最新评估报告"
-            empty-title="当前老人暂无报告"
-            empty-description="医生端可读取全部报告，但仍保持只读。"
-          />
-
           <section class="surface-card report-list-card">
             <header class="section-header">
               <div>
@@ -581,7 +579,7 @@ onMounted(async () => {
                 </div>
                 <div class="panel-actions">
                   <button class="secondary-button" type="button" @click="openReportDetail(getReportId(report))">
-                    查看详情
+                    查看报告
                   </button>
                   <button
                     class="ghost-button"
@@ -599,25 +597,6 @@ onMounted(async () => {
               v-else
               title="暂无报告记录"
               description="当前老人还没有已生成的报告。"
-            />
-          </section>
-
-          <section v-if="selectedReportId" class="surface-card report-detail-card">
-            <header class="section-header">
-              <div>
-                <h3>报告详情</h3>
-                <p>读取 `/report/{report_id}` 的标准化内容。</p>
-              </div>
-              <span>{{ reportDetailLoading ? '加载中' : selectedReportId }}</span>
-            </header>
-
-            <div v-if="reportDetailLoading" class="loading-card">正在加载报告详情...</div>
-            <ReportSummary
-              v-else
-              :reports="[normalizeReportRecord(selectedReportDetail || activeReport || {}) || {}]"
-              title="当前报告"
-              empty-title="报告详情为空"
-              empty-description="当前报告没有返回可展示的结构化内容。"
             />
           </section>
 
@@ -830,6 +809,17 @@ onMounted(async () => {
         />
       </aside>
     </section>
+
+    <ReportDetailModal
+      v-if="selectedReportId"
+      :report-id="selectedReportId"
+      :report="selectedReportDetail || activeReport || null"
+      :loading="reportDetailLoading"
+      :downloading="downloadingReportId === selectedReportId"
+      empty-text="当前报告没有返回可展示的结构化内容。"
+      @close="closeReportModal"
+      @download="handleDownloadReport(selectedReportId)"
+    />
   </div>
 </template>
 
@@ -912,7 +902,6 @@ onMounted(async () => {
 .record-list-card,
 .detail-card,
 .report-list-card,
-.report-detail-card,
 .session-card,
 .conversation-card,
 .management-card,
@@ -1160,7 +1149,6 @@ onMounted(async () => {
   .record-list-card,
   .detail-card,
   .report-list-card,
-  .report-detail-card,
   .session-card,
   .conversation-card,
   .management-card,
