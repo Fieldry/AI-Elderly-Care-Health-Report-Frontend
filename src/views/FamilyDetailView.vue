@@ -620,16 +620,6 @@ onMounted(async () => {
       </article>
 
       <aside class="detail-side">
-        <section class="surface-card hint-card">
-          <h3>仍建议补充</h3>
-          <div v-if="missingFields.length > 0" class="hint-chip-list">
-            <span v-for="field in missingFields" :key="field" class="hint-chip">{{ field }}</span>
-          </div>
-          <p v-else class="hint-card__text">核心字段已基本齐全，可继续访谈或生成报告。</p>
-        </section>
-
-        <ProfileOverview :profile="profileForm" title="当前画像预览" />
-
         <section class="surface-card interview-card">
           <header class="reports-shell__header">
             <h3>家属访谈</h3>

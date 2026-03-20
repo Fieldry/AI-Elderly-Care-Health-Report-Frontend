@@ -155,7 +155,6 @@ onMounted(async () => {
       <div class="bind-card__header">
         <div>
           <h2>绑定更多老人</h2>
-          <p>使用 `/auth/family/bind` 为当前家属账号追加绑定关系。</p>
         </div>
         <button class="secondary-button" type="button" @click="showBindForm = !showBindForm">
           {{ showBindForm ? '收起' : '新增绑定' }}

@@ -408,7 +408,6 @@ onMounted(async () => {
       <div>
         <p class="eyebrow">医生端</p>
         <h1>老人总览与随访管理</h1>
-        <p>医生端基于 `/doctor/elderly-list` 和 `/doctor/elderly/{id}` 聚合真实老人数据，支持只读查看画像与报告，并维护医生侧管理状态和随访记录。</p>
       </div>
 
       <div class="doctor-hero__metrics">
@@ -441,7 +440,6 @@ onMounted(async () => {
             <h2>老人总览</h2>
             <p>按老人维度查看医生可访问的全部画像、报告和管理状态。</p>
           </div>
-          <button class="secondary-button" type="button" @click="loadElderlyList">刷新</button>
         </header>
 
         <input
