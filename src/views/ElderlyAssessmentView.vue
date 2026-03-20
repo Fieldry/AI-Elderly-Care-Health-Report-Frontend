@@ -20,13 +20,30 @@ import ProfileOverview from '@/components/ProfileOverview.vue'
 import ReportSummary from '@/components/ReportSummary.vue'
 import { useGoogleStreamingSpeech } from '@/composables/useGoogleStreamingSpeech'
 import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
-import { clearStoredSession, setStoredElderlySessionSessionId, setStoredSession, useAuthSession } from '@/session'
-import type { ChatMessage, ChatMessageResponse, ChatStartResponse, SessionMetadata } from '@/types'
+import {
+  clearStoredElderlySessionSnapshot,
+  getStoredElderlySession,
+  getStoredElderlySessionSnapshot,
+  getStoredElderlySessionSnapshots,
+  setStoredElderlySessionSessionId,
+  setStoredElderlySessionSnapshot,
+  setStoredSession,
+  useAuthSession
+} from '@/session'
+import type {
+  ChatMessage,
+  ChatMessageResponse,
+  ChatStartResponse,
+  ElderlyAuthSession,
+  SessionMetadata
+} from '@/types'
 import { getReportGeneratedAt, getReportId, normalizeReportRecord } from '@/utils/report'
 import { mergeProfileSnapshots } from '@/utils/report'
 
 const router = useRouter()
 const { session } = useAuthSession()
+
+const elderlyAccessSession = ref<ElderlyAuthSession | null>(null)
 
 const sessionId = ref('')
 const sessions = ref<SessionMetadata[]>([])
@@ -41,7 +58,7 @@ const deleting = ref(false)
 const generatingReport = ref(false)
 const conversationState = ref('greeting')
 const errorMessage = ref('')
-const copyIdButtonText = ref('复制我的绑定 ID')
+const copyIdButtonText = ref('复制我的号码')
 const reportGenerationText = ref('')
 const completionPercent = ref<number | null>(null)
 const completedGroups = ref<string[]>([])
@@ -54,9 +71,7 @@ const downloadingReportId = ref('')
 
 const chatBodyRef = ref<HTMLElement | null>(null)
 
-const elderlyToken = computed(() =>
-  session.value?.role === 'elderly' ? session.value.token : ''
-)
+const elderlyToken = computed(() => elderlyAccessSession.value?.token || '')
 const activeReport = computed(() => {
   if (!selectedReportId.value) {
     return null
@@ -69,9 +84,7 @@ const sortedReports = computed(() =>
     getReportGeneratedAt(right).localeCompare(getReportGeneratedAt(left))
   )
 )
-const elderlyUserId = computed(() =>
-  session.value?.role === 'elderly' ? session.value.userId : ''
-)
+const elderlyUserId = computed(() => elderlyAccessSession.value?.userId || '')
 const progressPercentLabel = computed(() =>
   completionPercent.value === null ? '未获取' : `${completionPercent.value}%`
 )
@@ -149,6 +162,175 @@ const voiceHintText = computed(() => {
   return '点击语音输入即可说话。'
 })
 
+function cloneJson<T>(value: T) {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+function getSessionCreatedAt(item: SessionMetadata) {
+  return item.created_at || item.createdAt || ''
+}
+
+function sortSessionsByCreatedAt(items: SessionMetadata[]) {
+  return [...items].sort((left, right) => getSessionCreatedAt(right).localeCompare(getSessionCreatedAt(left)))
+}
+
+function dedupeSessions(items: SessionMetadata[]) {
+  return Array.from(
+    items.reduce((map, item) => {
+      if (item.session_id) {
+        map.set(item.session_id, item)
+      }
+      return map
+    }, new Map<string, SessionMetadata>()).values()
+  )
+}
+
+function createSessionMetadata(sessionIdValue: string, userIdValue: string, createdAt = new Date().toISOString()) {
+  const hasProfile = Object.keys(profile.value || {}).length > 0
+  const hasReport = reports.value.length > 0
+
+  return {
+    session_id: sessionIdValue,
+    sessionId: sessionIdValue,
+    user_id: userIdValue,
+    userId: userIdValue,
+    created_at: createdAt,
+    createdAt,
+    status: conversationState.value,
+    has_profile: hasProfile,
+    hasProfile,
+    has_report: hasReport,
+    hasReport,
+    files: []
+  } satisfies SessionMetadata
+}
+
+function upsertSessionMetadata(metadata: SessionMetadata) {
+  sessions.value = sortSessionsByCreatedAt(dedupeSessions([metadata, ...sessions.value]))
+}
+
+function getLocalSessionMetadata(userId = elderlyUserId.value) {
+  if (!userId) {
+    return [] as SessionMetadata[]
+  }
+
+  return sortSessionsByCreatedAt(
+    dedupeSessions(getStoredElderlySessionSnapshots(userId).map((snapshot) => snapshot.metadata))
+  )
+}
+
+function hydrateSessionsFromLocal(userId = elderlyUserId.value) {
+  const localSessions = getLocalSessionMetadata(userId)
+  sessions.value = localSessions
+  return localSessions
+}
+
+function updateActiveElderlySession(nextSession: ElderlyAuthSession | null) {
+  elderlyAccessSession.value = nextSession
+}
+
+function updateCurrentSessionId(nextSessionId: string) {
+  sessionId.value = nextSessionId
+
+  if (elderlyAccessSession.value) {
+    elderlyAccessSession.value = {
+      ...elderlyAccessSession.value,
+      sessionId: nextSessionId
+    }
+  }
+
+  setStoredElderlySessionSessionId(nextSessionId)
+}
+
+function resetProgressGroups() {
+  completedGroups.value = []
+  pendingGroups.value = []
+  progressMissingFields.value = {}
+}
+
+function resolveSnapshotMetadata(targetSessionId = sessionId.value) {
+  const existingMetadata =
+    sessions.value.find((item) => item.session_id === targetSessionId) ||
+    getStoredElderlySessionSnapshot(targetSessionId)?.metadata
+
+  if (existingMetadata) {
+    const normalizedMetadata = {
+      ...existingMetadata,
+      user_id: existingMetadata.user_id || existingMetadata.userId || elderlyUserId.value,
+      userId: existingMetadata.userId || existingMetadata.user_id || elderlyUserId.value,
+      status: conversationState.value || existingMetadata.status,
+      has_profile: Object.keys(profile.value || {}).length > 0,
+      hasProfile: Object.keys(profile.value || {}).length > 0,
+      has_report: reports.value.length > 0,
+      hasReport: reports.value.length > 0
+    } satisfies SessionMetadata
+
+    upsertSessionMetadata(normalizedMetadata)
+    return normalizedMetadata
+  }
+
+  const metadata = createSessionMetadata(targetSessionId, elderlyUserId.value)
+  upsertSessionMetadata(metadata)
+  return metadata
+}
+
+function persistCurrentSnapshot(metadata = resolveSnapshotMetadata()) {
+  if (!sessionId.value || !elderlyUserId.value) {
+    return
+  }
+
+  setStoredElderlySessionSnapshot({
+    sessionId: sessionId.value,
+    userId: elderlyUserId.value,
+    metadata,
+    messages: messages.value.map((message) => ({ ...message })),
+    profile: Object.keys(profile.value || {}).length > 0 ? cloneJson(profile.value) : undefined,
+    reports: cloneJson(reports.value),
+    conversationState: conversationState.value,
+    completionPercent: completionPercent.value
+  })
+}
+
+function applyStoredSessionSnapshot(targetSessionId: string, message: string) {
+  const snapshot = getStoredElderlySessionSnapshot(targetSessionId)
+  if (!snapshot) {
+    return false
+  }
+
+  updateCurrentSessionId(snapshot.sessionId)
+  messages.value = snapshot.messages.map((entry) => ({ ...entry }))
+  profile.value = cloneJson(snapshot.profile || {})
+  reports.value = cloneJson(snapshot.reports || [])
+  conversationState.value = snapshot.conversationState || 'collecting'
+  completionPercent.value = normalizeProgressPercent(snapshot.completionPercent)
+  resetProgressGroups()
+  upsertSessionMetadata(snapshot.metadata)
+
+  if (selectedReportId.value && !reports.value.some((item) => getReportId(item) === selectedReportId.value)) {
+    resetSelectedReport()
+  }
+
+  errorMessage.value = message
+  return true
+}
+
+function resolvePreferredElderlySession() {
+  const currentSession = session.value
+  if (currentSession?.role === 'elderly') {
+    return currentSession
+  }
+
+  return getStoredElderlySession()
+}
+
+function resolveInitialSessionId(preferredSession: ElderlyAuthSession, availableSessions: SessionMetadata[]) {
+  if (availableSessions.some((item) => item.session_id === preferredSession.sessionId)) {
+    return preferredSession.sessionId
+  }
+
+  return availableSessions[0]?.session_id || preferredSession.sessionId
+}
+
 function formatDateTime(value: string) {
   if (!value) {
     return '--'
@@ -199,7 +381,7 @@ async function copyElderlyUserId() {
   if (!elderlyUserId.value) {
     copyIdButtonText.value = 'ID 未就绪'
     window.setTimeout(() => {
-      copyIdButtonText.value = '复制我的绑定 ID'
+      copyIdButtonText.value = '复制我的号码'
     }, 1600)
     return
   }
@@ -225,12 +407,12 @@ async function copyElderlyUserId() {
   }
 
   window.setTimeout(() => {
-    copyIdButtonText.value = '复制我的绑定 ID'
+    copyIdButtonText.value = '复制我的号码'
   }, 1800)
 }
 
 function applyStartedSession(response: ChatStartResponse) {
-  setStoredSession({
+  const nextSession = {
     token: response.accessToken,
     userName: '长者本人',
     role: 'elderly',
@@ -239,7 +421,10 @@ function applyStartedSession(response: ChatStartResponse) {
     userId: response.userId,
     sessionId: response.sessionId,
     userType: response.userType
-  })
+  } satisfies ElderlyAuthSession
+
+  updateActiveElderlySession(nextSession)
+  setStoredSession(nextSession)
 }
 
 async function scrollChatToBottom() {
@@ -274,7 +459,11 @@ async function refreshSessions(token: string) {
 
   try {
     const response = await listSessions(token)
-    sessions.value = response.sort((left, right) => right.created_at.localeCompare(left.created_at))
+    const nextSessions = sortSessionsByCreatedAt(dedupeSessions([...response, ...getLocalSessionMetadata()]))
+    sessions.value = nextSessions
+    return nextSessions
+  } catch {
+    return hydrateSessionsFromLocal()
   } finally {
     sessionsLoading.value = false
   }
@@ -299,14 +488,15 @@ async function refreshProgressState(targetSessionId: string, token: string) {
 }
 
 async function refreshSessionArtifacts(targetSessionId: string, token: string) {
-  const [detail, latestProfile, selfProfile] = await Promise.all([
-    getSessionDetail(targetSessionId, token),
-    getChatProfile(targetSessionId, token).catch(() => ({})),
-    getElderlyProfile(token).catch(() => ({}))
+  const [latestProfileResult, selfProfileResult] = await Promise.allSettled([
+    getChatProfile(targetSessionId, token),
+    getElderlyProfile(token)
   ])
 
-  profile.value = mergeProfileSnapshots(selfProfile, detail.profile || {}, latestProfile)
-  reports.value = detail.reports?.length > 0 ? detail.reports : reports.value
+  const latestProfile = latestProfileResult.status === 'fulfilled' ? latestProfileResult.value : {}
+  const selfProfile = selfProfileResult.status === 'fulfilled' ? selfProfileResult.value : {}
+
+  profile.value = mergeProfileSnapshots(selfProfile, profile.value || {}, latestProfile)
 }
 
 async function openReportDetail(reportId: string) {
@@ -333,24 +523,45 @@ async function loadExistingSession(targetSessionId: string, token: string) {
   clearVoiceInput()
 
   try {
-    sessionId.value = targetSessionId
-    setStoredElderlySessionSessionId(targetSessionId)
+    updateCurrentSessionId(targetSessionId)
     const detail = await getSessionDetail(targetSessionId, token)
     const conversation =
       detail.conversation && detail.conversation.length > 0
         ? detail.conversation
         : await getChatHistory(targetSessionId, token)
 
+    const detailMetadata =
+      detail.metadata?.session_id && (detail.metadata.user_id || detail.metadata.userId)
+        ? detail.metadata
+        : createSessionMetadata(targetSessionId, elderlyUserId.value)
+
     messages.value = conversation
     profile.value = mergeProfileSnapshots(detail.profile || {})
     reports.value = detail.reports || []
+    upsertSessionMetadata({
+      ...detailMetadata,
+      user_id: detailMetadata.user_id || detailMetadata.userId || elderlyUserId.value,
+      userId: detailMetadata.userId || detailMetadata.user_id || elderlyUserId.value
+    })
 
-    await Promise.all([
+    if (selectedReportId.value && !reports.value.some((item) => getReportId(item) === selectedReportId.value)) {
+      resetSelectedReport()
+    }
+
+    persistCurrentSnapshot(resolveSnapshotMetadata(targetSessionId))
+
+    await Promise.allSettled([
       refreshProgressState(targetSessionId, token).catch(() => {}),
       refreshSessionArtifacts(targetSessionId, token),
       refreshReportCollection(token),
       refreshSessions(token)
     ])
+    persistCurrentSnapshot(resolveSnapshotMetadata(targetSessionId))
+  } catch (error) {
+    if (applyStoredSessionSnapshot(targetSessionId, '后端会话加载失败，已恢复本机保存的会话内容。')) {
+      return
+    }
+    throw error
   } finally {
     loading.value = false
     await scrollChatToBottom()
@@ -367,7 +578,7 @@ async function createNewSession() {
   try {
     const response = await startChat()
     applyStartedSession(response)
-    sessionId.value = response.sessionId
+    updateCurrentSessionId(response.sessionId)
     messages.value = [
       {
         role: 'assistant',
@@ -375,18 +586,18 @@ async function createNewSession() {
       }
     ]
     completionPercent.value = null
-    completedGroups.value = []
-    pendingGroups.value = []
-    progressMissingFields.value = {}
+    resetProgressGroups()
     profile.value = {}
     reports.value = []
     conversationState.value = 'greeting'
+    persistCurrentSnapshot(createSessionMetadata(response.sessionId, response.userId))
 
     await Promise.allSettled([
       refreshSessions(response.accessToken),
       refreshProgressState(response.sessionId, response.accessToken),
       refreshReportCollection(response.accessToken)
     ])
+    persistCurrentSnapshot(resolveSnapshotMetadata(response.sessionId))
   } catch (error) {
     errorMessage.value =
       error instanceof Error ? error.message : '启动评估失败，请检查后端服务是否可用。'
@@ -396,20 +607,41 @@ async function createNewSession() {
   }
 }
 
-async function initializeAssessment() {
-  const currentSession = session.value
+async function handleStartNewAssessment() {
+  if (elderlyUserId.value || sessions.value.length > 0) {
+    const confirmed = window.confirm('这会创建新的老人档案与独立评估记录，不会续接当前会话。是否继续？')
+    if (!confirmed) {
+      return
+    }
+  }
 
-  if (!currentSession || currentSession.role !== 'elderly') {
+  await createNewSession()
+}
+
+async function initializeAssessment() {
+  const preferredSession = resolvePreferredElderlySession()
+
+  if (!preferredSession) {
     await createNewSession()
     return
   }
 
+  updateActiveElderlySession(preferredSession)
+  hydrateSessionsFromLocal(preferredSession.userId)
+
   try {
-    await loadExistingSession(currentSession.sessionId, currentSession.token)
-  } catch (error) {
-    if (isForbidden(error)) {
-      clearStoredSession()
+    const availableSessions = await refreshSessions(preferredSession.token)
+    const targetSessionId = resolveInitialSessionId(preferredSession, availableSessions)
+    await loadExistingSession(targetSessionId, preferredSession.token)
+  } catch {
+    const localSessions = hydrateSessionsFromLocal(preferredSession.userId)
+    const localTargetSessionId =
+      resolveInitialSessionId(preferredSession, localSessions) || localSessions[0]?.session_id || ''
+
+    if (localTargetSessionId && applyStoredSessionSnapshot(localTargetSessionId, '已恢复本机保存的评估内容。')) {
+      return
     }
+
     await createNewSession()
   }
 }
@@ -463,18 +695,25 @@ async function handleSend() {
     conversationState.value = response.state || 'collecting'
     completionPercent.value = normalizeProgressPercent(response.progress)
 
-    await Promise.all([
+    await Promise.allSettled([
       refreshProgressState(sessionId.value, elderlyToken.value).catch(() => {}),
       refreshSessionArtifacts(sessionId.value, elderlyToken.value),
       refreshSessions(elderlyToken.value),
       refreshReportCollection(elderlyToken.value)
     ])
+    persistCurrentSnapshot()
   } catch (error) {
-    if (isForbidden(error)) {
-      clearStoredSession()
+    if (!messages.value[assistantIndex]?.content) {
+      messages.value.splice(assistantIndex, 1)
     }
+
+    persistCurrentSnapshot()
     errorMessage.value =
-      error instanceof Error ? error.message : '发送失败，请稍后重试。'
+      isForbidden(error)
+        ? '当前会话暂时无法继续同步，请稍后重试或先查看已保存内容。'
+        : error instanceof Error
+          ? error.message
+          : '发送失败，请稍后重试。'
   } finally {
     sending.value = false
   }
@@ -510,12 +749,13 @@ async function handleGenerateReport() {
       }
     }
 
-    await Promise.all([
+    await Promise.allSettled([
       refreshReportCollection(elderlyToken.value),
       refreshSessionArtifacts(sessionId.value, elderlyToken.value),
       refreshSessions(elderlyToken.value),
       refreshProgressState(sessionId.value, elderlyToken.value).catch(() => {})
     ])
+    persistCurrentSnapshot()
 
     if (reportId) {
       await openReportDetail(reportId)
@@ -542,10 +782,12 @@ async function handleDeleteSession() {
   errorMessage.value = ''
 
   try {
+    const deletingSessionId = sessionId.value
     await deleteSession(sessionId.value, elderlyToken.value)
     resetSelectedReport()
+    clearStoredElderlySessionSnapshot(deletingSessionId)
 
-    const remainingSessions = sessions.value.filter((item) => item.session_id !== sessionId.value)
+    const remainingSessions = sessions.value.filter((item) => item.session_id !== deletingSessionId)
     sessions.value = remainingSessions
 
     if (remainingSessions.length > 0) {
@@ -644,10 +886,10 @@ onMounted(async () => {
         <header class="chat-card__header">
           <div>
             <h2>对话采集</h2>
-            <p>请直接描述您的身体情况、慢病、生活能力和日常习惯。</p>
+            <p>请直接描述您的身体情况、生活能力和日常习惯。</p>
           </div>
           <div class="chat-card__header-actions">
-            <p>这是您的专属绑定 ID，可复制后提供给家属绑定。</p>
+            <p>这是您的号码，可复制给您的家属绑定</p>
             <button
               class="secondary-button copy-id-button"
               type="button"
@@ -736,8 +978,8 @@ onMounted(async () => {
           </div>
 
           <div class="summary-card__actions">
-            <button class="secondary-button summary-card__action" type="button" @click="createNewSession">
-              开始新评估
+            <button class="secondary-button summary-card__action" type="button" @click="handleStartNewAssessment">
+              新建独立评估
             </button>
             <button
               class="primary-button summary-card__action"

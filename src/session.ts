@@ -1,10 +1,30 @@
 import { computed, reactive } from 'vue'
 
-import type { AuthSession, ChatMessage, FamilyAuthSession, Role } from '@/types'
+import type {
+  AuthSession,
+  ChatMessage,
+  ElderlyAuthSession,
+  FamilyAuthSession,
+  Role,
+  SessionMetadata
+} from '@/types'
 
 const STORAGE_KEY = 'ai-elderly-care.session'
+const LAST_ELDERLY_SESSION_KEY = 'ai-elderly-care.last-elderly-session'
+const ELDERLY_SESSION_SNAPSHOT_KEY = 'ai-elderly-care.elderly-session-snapshots'
 const FAMILY_SESSION_MAP_KEY = 'ai-elderly-care.family-session-map'
 const FAMILY_CONVERSATION_SNAPSHOT_KEY = 'ai-elderly-care.family-conversation-snapshots'
+
+interface ElderlySessionSnapshot {
+  sessionId: string
+  userId: string
+  metadata: SessionMetadata
+  messages: ChatMessage[]
+  profile?: Record<string, unknown>
+  reports?: Array<Record<string, unknown>>
+  conversationState?: string
+  completionPercent?: number | null
+}
 
 interface FamilyConversationSnapshot {
   sessionId: string
@@ -113,6 +133,48 @@ function writeFamilySessionMap(nextMap: Record<string, string>) {
   window.localStorage.setItem(FAMILY_SESSION_MAP_KEY, JSON.stringify(nextMap))
 }
 
+function normalizeSessionMetadata(raw: unknown): SessionMetadata | null {
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+
+  const record = raw as Record<string, unknown>
+  const sessionId = typeof record.session_id === 'string'
+    ? record.session_id
+    : typeof record.sessionId === 'string'
+      ? record.sessionId
+      : ''
+  const createdAt = typeof record.created_at === 'string'
+    ? record.created_at
+    : typeof record.createdAt === 'string'
+      ? record.createdAt
+      : ''
+
+  if (!sessionId || !createdAt) {
+    return null
+  }
+
+  const files = Array.isArray(record.files)
+    ? record.files.filter((item): item is string => typeof item === 'string')
+    : []
+
+  return {
+    session_id: sessionId,
+    sessionId,
+    user_id: typeof record.user_id === 'string' ? record.user_id : typeof record.userId === 'string' ? record.userId : undefined,
+    userId: typeof record.user_id === 'string' ? record.user_id : typeof record.userId === 'string' ? record.userId : undefined,
+    created_at: createdAt,
+    createdAt,
+    status: typeof record.status === 'string' ? record.status : undefined,
+    title: typeof record.title === 'string' ? record.title : undefined,
+    has_report: Boolean(record.has_report ?? record.hasReport),
+    hasReport: Boolean(record.has_report ?? record.hasReport),
+    has_profile: Boolean(record.has_profile ?? record.hasProfile),
+    hasProfile: Boolean(record.has_profile ?? record.hasProfile),
+    files
+  }
+}
+
 function normalizeChatMessage(raw: unknown): ChatMessage | null {
   if (!raw || typeof raw !== 'object') {
     return null
@@ -130,6 +192,112 @@ function normalizeChatMessage(raw: unknown): ChatMessage | null {
     content,
     timestamp: typeof record.timestamp === 'string' ? record.timestamp : undefined
   }
+}
+
+function normalizeRecord(raw: unknown) {
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null
+}
+
+function normalizeRecordArray(raw: unknown) {
+  return Array.isArray(raw)
+    ? raw.map((item) => normalizeRecord(item)).filter(Boolean) as Array<Record<string, unknown>>
+    : []
+}
+
+function normalizeElderlySessionSnapshot(raw: unknown): ElderlySessionSnapshot | null {
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+
+  const record = raw as Record<string, unknown>
+  const sessionId = typeof record.sessionId === 'string' ? record.sessionId : ''
+  const userId = typeof record.userId === 'string' ? record.userId : ''
+  const metadata = normalizeSessionMetadata(record.metadata)
+
+  if (!sessionId || !userId || !metadata) {
+    return null
+  }
+
+  return {
+    sessionId,
+    userId,
+    metadata,
+    messages: Array.isArray(record.messages)
+      ? record.messages.map(normalizeChatMessage).filter(Boolean) as ChatMessage[]
+      : [],
+    profile: normalizeRecord(record.profile) || undefined,
+    reports: normalizeRecordArray(record.reports),
+    conversationState: typeof record.conversationState === 'string' ? record.conversationState : undefined,
+    completionPercent:
+      typeof record.completionPercent === 'number'
+        ? record.completionPercent
+        : record.completionPercent === null
+          ? null
+          : undefined
+  }
+}
+
+function readLastElderlySession() {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  const raw = window.localStorage.getItem(LAST_ELDERLY_SESSION_KEY)
+  if (!raw) {
+    return null
+  }
+
+  try {
+    const parsed = normalizeSession(JSON.parse(raw))
+    return parsed?.role === 'elderly' ? parsed : null
+  } catch {
+    window.localStorage.removeItem(LAST_ELDERLY_SESSION_KEY)
+    return null
+  }
+}
+
+function writeLastElderlySession(session: ElderlyAuthSession | null) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  if (!session) {
+    window.localStorage.removeItem(LAST_ELDERLY_SESSION_KEY)
+    return
+  }
+
+  window.localStorage.setItem(LAST_ELDERLY_SESSION_KEY, JSON.stringify(session))
+}
+
+function readElderlySessionSnapshots() {
+  if (typeof window === 'undefined') {
+    return {} as Record<string, ElderlySessionSnapshot>
+  }
+
+  const raw = window.localStorage.getItem(ELDERLY_SESSION_SNAPSHOT_KEY)
+  if (!raw) {
+    return {} as Record<string, ElderlySessionSnapshot>
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .map(([sessionId, snapshot]) => [sessionId, normalizeElderlySessionSnapshot(snapshot)] as const)
+        .filter((entry): entry is [string, ElderlySessionSnapshot] => !!entry[1])
+    )
+  } catch {
+    window.localStorage.removeItem(ELDERLY_SESSION_SNAPSHOT_KEY)
+    return {} as Record<string, ElderlySessionSnapshot>
+  }
+}
+
+function writeElderlySessionSnapshots(nextSnapshots: Record<string, ElderlySessionSnapshot>) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.setItem(ELDERLY_SESSION_SNAPSHOT_KEY, JSON.stringify(nextSnapshots))
 }
 
 function normalizeFamilyConversationSnapshot(raw: unknown): FamilyConversationSnapshot | null {
@@ -209,6 +377,8 @@ function readSession(): AuthSession | null {
 
 const state = reactive({
   session: readSession(),
+  lastElderlySession: readLastElderlySession(),
+  elderlySessionSnapshots: readElderlySessionSnapshots(),
   familySessionMap: readFamilySessionMap(),
   familyConversationSnapshots: readFamilyConversationSnapshots()
 })
@@ -219,6 +389,10 @@ export function getStoredSession() {
 
 export function setStoredSession(nextSession: AuthSession) {
   state.session = nextSession
+  if (nextSession.role === 'elderly') {
+    state.lastElderlySession = nextSession
+    writeLastElderlySession(nextSession)
+  }
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession))
   }
@@ -233,6 +407,10 @@ export function clearStoredSession() {
   if (typeof window !== 'undefined') {
     window.localStorage.removeItem(STORAGE_KEY)
   }
+}
+
+export function getStoredElderlySession() {
+  return state.lastElderlySession
 }
 
 export function roleHomePath(role: Role) {
@@ -256,17 +434,54 @@ export function useAuthSession() {
 }
 
 export function setStoredElderlySessionSessionId(sessionId: string) {
-  const currentSession = state.session
-  if (!currentSession || currentSession.role !== 'elderly') {
+  if (state.session?.role === 'elderly') {
+    const nextSession = {
+      ...state.session,
+      sessionId
+    } satisfies AuthSession
+
+    setStoredSession(nextSession)
+  }
+
+  if (state.lastElderlySession) {
+    state.lastElderlySession = {
+      ...state.lastElderlySession,
+      sessionId
+    }
+    writeLastElderlySession(state.lastElderlySession)
+  }
+}
+
+export function getStoredElderlySessionSnapshots(userId?: string) {
+  const snapshots = Object.values(state.elderlySessionSnapshots)
+  if (!userId) {
+    return snapshots
+  }
+
+  return snapshots.filter((snapshot) => snapshot.userId === userId)
+}
+
+export function getStoredElderlySessionSnapshot(sessionId: string) {
+  return state.elderlySessionSnapshots[sessionId] || null
+}
+
+export function setStoredElderlySessionSnapshot(snapshot: ElderlySessionSnapshot) {
+  state.elderlySessionSnapshots = {
+    ...state.elderlySessionSnapshots,
+    [snapshot.sessionId]: snapshot
+  }
+  writeElderlySessionSnapshots(state.elderlySessionSnapshots)
+}
+
+export function clearStoredElderlySessionSnapshot(sessionId: string) {
+  if (!state.elderlySessionSnapshots[sessionId]) {
     return
   }
 
-  const nextSession = {
-    ...currentSession,
-    sessionId
-  } satisfies AuthSession
-
-  setStoredSession(nextSession)
+  const nextSnapshots = { ...state.elderlySessionSnapshots }
+  delete nextSnapshots[sessionId]
+  state.elderlySessionSnapshots = nextSnapshots
+  writeElderlySessionSnapshots(nextSnapshots)
 }
 
 export function getStoredFamilyConversationSessionId(elderlyId: string) {
