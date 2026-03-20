@@ -75,6 +75,11 @@ function formatRecommendationItems(value: unknown) {
 }
 
 function resolvePayload(report: Record<string, unknown>) {
+  const explicitPayload = asObject(report.report)
+  if (explicitPayload) {
+    return explicitPayload
+  }
+
   const nestedPayload = asObject(report.report_data)
   if (nestedPayload) {
     return nestedPayload
@@ -83,16 +88,70 @@ function resolvePayload(report: Record<string, unknown>) {
   return report
 }
 
+export function getReportId(report: Record<string, unknown> | null | undefined) {
+  if (!report) {
+    return ''
+  }
+
+  return (
+    asString(report.reportId) ||
+    asString(report.report_id) ||
+    asString(report.id) ||
+    asString(asObject(report.report)?.reportId) ||
+    asString(asObject(report.report)?.report_id)
+  )
+}
+
+export function getReportGeneratedAt(report: Record<string, unknown> | null | undefined) {
+  if (!report) {
+    return ''
+  }
+
+  const payload = resolvePayload(report)
+  return (
+    asString(report.generated_at) ||
+    asString(report.generatedAt) ||
+    asString(payload.generated_at) ||
+    asString(payload.generatedAt)
+  )
+}
+
+export function normalizeReportRecord(report: Record<string, unknown> | null | undefined) {
+  if (!report) {
+    return null
+  }
+
+  const payload = resolvePayload(report)
+  const reportId = getReportId(report)
+  const generatedAt = getReportGeneratedAt(report)
+
+  return {
+    ...report,
+    reportId: reportId || undefined,
+    generated_at: generatedAt || undefined,
+    generatedAt: generatedAt || undefined,
+    report: payload
+  }
+}
+
 export function normalizeLatestReport(reports: Array<Record<string, unknown>> | null | undefined) {
   if (!reports || reports.length === 0) {
     return null
   }
 
-  const latest = [...reports].sort((left, right) => {
-    const leftTime = asString(left.generated_at || left.generatedAt)
-    const rightTime = asString(right.generated_at || right.generatedAt)
-    return rightTime.localeCompare(leftTime)
-  })[0]
+  const latest =
+    [...reports]
+      .map((report) => normalizeReportRecord(report))
+      .filter(Boolean)
+      .sort((left, right) => {
+        const leftTime = asString(left?.generated_at || left?.generatedAt)
+        const rightTime = asString(right?.generated_at || right?.generatedAt)
+        return rightTime.localeCompare(leftTime)
+      })[0] || null
+
+  if (!latest) {
+    return null
+  }
 
   const payload = resolvePayload(latest)
   const summary = asString(payload.summary)

@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { loginWithPassword } from '@/api/auth'
+import { loginWithPassword, registerFamilyAccount } from '@/api/auth'
+import { getHealthStatus } from '@/api/health'
 import { roleHomePath, setStoredSession } from '@/session'
-import type { Role } from '@/types'
+import type { AuthResponse, Role } from '@/types'
 
 const props = defineProps<{
   role: Role
 }>()
+
+type FamilyEntryMode = 'login' | 'register'
 
 const router = useRouter()
 
@@ -23,9 +26,9 @@ const roleContent = computed(() => {
 
   if (props.role === 'family') {
     return {
-      title: '家属端登录',
+      title: '家属端入口',
       description: '登录后查看已关联老人的信息画像，补全缺失数据，并同步查看健康报告返回情况。',
-      bullets: ['关联老人列表', '画像字段编辑', '真实报告空态降级']
+      bullets: ['关联老人列表', '画像字段编辑', '可直接绑定或注册家属账号']
     }
   }
 
@@ -36,15 +39,91 @@ const roleContent = computed(() => {
   }
 })
 
+const familyMode = ref<FamilyEntryMode>('login')
 const form = reactive({
   phone: '',
-  password: ''
+  password: '',
+  name: '',
+  elderlyId: '',
+  relation: '子女'
 })
 
+const healthStatusText = ref('正在检查后端服务...')
 const isSubmitting = ref(false)
 const errorMessage = ref('')
 
 const requiresLogin = computed(() => props.role !== 'elderly')
+const isFamilyRegisterMode = computed(() => props.role === 'family' && familyMode.value === 'register')
+const submitButtonLabel = computed(() => {
+  if (isSubmitting.value) {
+    return '提交中...'
+  }
+
+  if (!requiresLogin.value) {
+    return '立即进入'
+  }
+
+  if (isFamilyRegisterMode.value) {
+    return '注册并进入'
+  }
+
+  return '登录并进入'
+})
+
+function storeSessionFromResponse(response: AuthResponse) {
+  if (props.role === 'family') {
+    setStoredSession({
+      token: response.token,
+      userName: response.user_name || '家属用户',
+      role: 'family',
+      backendRole: response.role,
+      expiresAt: response.expires_at,
+      familyId: response.family_id,
+      elderlyIds: response.elderly_ids || []
+    })
+    return
+  }
+
+  setStoredSession({
+    token: response.token,
+    userName: response.user_name || '医生用户',
+    role: 'doctor',
+    backendRole: response.role,
+    expiresAt: response.expires_at
+  })
+}
+
+function resetError() {
+  errorMessage.value = ''
+}
+
+function validateForm() {
+  if (!form.phone.trim() || !form.password.trim()) {
+    errorMessage.value = '请输入手机号和密码。'
+    return false
+  }
+
+  if (!isFamilyRegisterMode.value) {
+    return true
+  }
+
+  if (!form.name.trim()) {
+    errorMessage.value = '请输入家属姓名。'
+    return false
+  }
+
+  if (!form.elderlyId.trim()) {
+    errorMessage.value = '请输入要绑定的老人 ID。'
+    return false
+  }
+
+  if (!form.relation.trim()) {
+    errorMessage.value = '请输入与老人的关系。'
+    return false
+  }
+
+  return true
+}
 
 async function handleContinue() {
   if (!requiresLogin.value) {
@@ -52,22 +131,25 @@ async function handleContinue() {
     return
   }
 
-  if (!form.phone.trim() || !form.password.trim()) {
-    errorMessage.value = '请输入手机号和密码。'
+  if (!validateForm()) {
     return
   }
 
   isSubmitting.value = true
-  errorMessage.value = ''
+  resetError()
 
   try {
-    const response = await loginWithPassword(form.phone.trim(), form.password.trim())
-    setStoredSession({
-      token: response.token,
-      userName: response.user_name || (props.role === 'family' ? '家属用户' : '医生用户'),
-      role: props.role,
-      backendRole: response.role
-    })
+    const response = isFamilyRegisterMode.value
+      ? await registerFamilyAccount({
+          name: form.name.trim(),
+          phone: form.phone.trim(),
+          password: form.password.trim(),
+          elderlyId: form.elderlyId.trim(),
+          relation: form.relation.trim()
+        })
+      : await loginWithPassword(form.phone.trim(), form.password.trim())
+
+    storeSessionFromResponse(response)
     await router.push(roleHomePath(props.role))
   } catch (error) {
     errorMessage.value =
@@ -76,6 +158,15 @@ async function handleContinue() {
     isSubmitting.value = false
   }
 }
+
+onMounted(async () => {
+  try {
+    const response = await getHealthStatus()
+    healthStatusText.value = `${response.service} 当前状态：${response.status}`
+  } catch {
+    healthStatusText.value = '当前无法连接后端服务，请确认 API 已启动。'
+  }
+})
 </script>
 
 <template>
@@ -87,35 +178,66 @@ async function handleContinue() {
       <ul class="access-card__bullets">
         <li v-for="bullet in roleContent.bullets" :key="bullet">{{ bullet }}</li>
       </ul>
-      <p class="access-card__note">
-        当前后端登录为演示模式，前端按所选角色入口组织页面与路由，不承诺真实权限隔离。
-      </p>
+      <p class="access-card__note">{{ healthStatusText }}</p>
     </section>
 
     <section class="access-card access-card--form">
       <template v-if="requiresLogin">
-        <h2>进入{{ role === 'family' ? '家属端' : '医生端' }}</h2>
+        <div class="access-card__header">
+          <h2>进入{{ role === 'family' ? '家属端' : '医生端' }}</h2>
+          <div v-if="role === 'family'" class="mode-switch">
+            <button
+              class="mode-switch__button"
+              :class="{ 'is-active': familyMode === 'login' }"
+              type="button"
+              @click="familyMode = 'login'"
+            >
+              登录
+            </button>
+            <button
+              class="mode-switch__button"
+              :class="{ 'is-active': familyMode === 'register' }"
+              type="button"
+              @click="familyMode = 'register'"
+            >
+              注册并绑定
+            </button>
+          </div>
+        </div>
+
+        <label v-if="isFamilyRegisterMode" class="field">
+          <span>家属姓名</span>
+          <input v-model="form.name" type="text" placeholder="请输入家属姓名" @input="resetError" />
+        </label>
         <label class="field">
           <span>手机号</span>
-          <input v-model="form.phone" type="tel" placeholder="请输入手机号" />
+          <input v-model="form.phone" type="tel" placeholder="请输入手机号" @input="resetError" />
         </label>
         <label class="field">
           <span>密码</span>
-          <input v-model="form.password" type="password" placeholder="请输入密码" />
+          <input v-model="form.password" type="password" placeholder="请输入密码" @input="resetError" />
+        </label>
+        <label v-if="isFamilyRegisterMode" class="field">
+          <span>老人 ID</span>
+          <input v-model="form.elderlyId" type="text" placeholder="请输入首位绑定老人的 ID" @input="resetError" />
+        </label>
+        <label v-if="isFamilyRegisterMode" class="field">
+          <span>关系</span>
+          <input v-model="form.relation" type="text" placeholder="例如 子女 / 配偶" @input="resetError" />
         </label>
       </template>
 
       <template v-else>
         <h2>开始长者评估</h2>
         <p class="access-card__description">
-          长者端无需登录即可直接开始当前评估会话，适合现场陪同或自主使用。
+          长者端无需登录即可直接开始当前评估会话，系统会自动申请专属 token 并持久化当前评估状态。
         </p>
       </template>
 
       <p v-if="errorMessage" class="form-error">{{ errorMessage }}</p>
 
       <button class="primary-button access-submit" :disabled="isSubmitting" type="button" @click="handleContinue">
-        {{ isSubmitting ? '提交中...' : requiresLogin ? '登录并进入' : '立即进入' }}
+        {{ submitButtonLabel }}
       </button>
     </section>
   </div>
@@ -169,6 +291,33 @@ async function handleContinue() {
 
 .access-card__bullets {
   padding-left: 18px;
+}
+
+.access-card__header {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.mode-switch {
+  display: inline-flex;
+  padding: 5px;
+  border-radius: 999px;
+  background: rgba(90, 142, 209, 0.12);
+  width: fit-content;
+}
+
+.mode-switch__button {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  color: var(--ink);
+}
+
+.mode-switch__button.is-active {
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--ink-strong);
+  box-shadow: 0 10px 20px rgba(59, 111, 174, 0.12);
 }
 
 .field {
