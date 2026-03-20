@@ -916,9 +916,10 @@ onMounted(async () => {
     <section class="assessment-layout">
       <article class="surface-card chat-card">
         <header class="chat-card__header">
-          <div>
+          <div class="chat-card__intro">
+            <p class="eyebrow">陪伴式评估</p>
             <h2>对话采集</h2>
-            <p>请直接描述您的身体情况、生活能力和日常习惯。</p>
+            <p class="chat-card__lead">请像平常聊天一样，描述您的身体情况、生活能力和日常习惯。</p>
           </div>
           <div class="chat-card__header-actions">
             <p>这是您的号码，可复制给您的家属绑定</p>
@@ -933,6 +934,17 @@ onMounted(async () => {
           </div>
         </header>
 
+        <div class="chat-card__meta">
+          <article class="chat-card__meta-pill">
+            <span>当前阶段</span>
+            <strong>{{ sessionStatusText }}</strong>
+          </article>
+          <article class="chat-card__meta-pill">
+            <span>信息完整度</span>
+            <strong>{{ progressPercentLabel }}</strong>
+          </article>
+        </div>
+
         <p v-if="errorMessage" class="error-banner">{{ errorMessage }}</p>
 
         <div ref="chatBodyRef" class="chat-stream">
@@ -942,9 +954,17 @@ onMounted(async () => {
             class="message-bubble"
             :class="`message-bubble--${message.role}`"
           >
-            <span class="message-bubble__role">{{ message.role === 'assistant' ? '健康助手' : '我' }}</span>
-            <div class="message-bubble__content">
-              {{ message.content || '...' }}
+            <span class="message-bubble__avatar">{{ message.role === 'assistant' ? '健' : '我' }}</span>
+            <div class="message-bubble__panel">
+              <div class="message-bubble__meta">
+                <span class="message-bubble__role">{{ message.role === 'assistant' ? '健康助手' : '我' }}</span>
+                <span v-if="message.timestamp" class="message-bubble__time">
+                  {{ formatDateTime(message.timestamp) }}
+                </span>
+              </div>
+              <div class="message-bubble__content">
+                {{ message.content || '...' }}
+              </div>
             </div>
           </article>
 
@@ -955,32 +975,45 @@ onMounted(async () => {
         </div>
 
         <footer class="chat-composer">
-          <label class="composer-label" for="elderly-input">描述当前情况</label>
-          <textarea
-            id="elderly-input"
-            v-model="inputText"
-            class="composer-textarea"
-            :disabled="loading || sending"
-            placeholder="例如：老人 82 岁，男，最近走路容易喘，晚上睡眠一般。"
-            rows="4"
-            @keydown.enter.exact.prevent="handleSend"
-          />
-          <div class="composer-actions">
-            <div class="voice-panel">
-              <button
-                class="secondary-button voice-button"
-                type="button"
-                :disabled="loading || !isVoiceAvailable"
-                @click="toggleVoiceInput"
-              >
-                <span class="voice-button__dot" :class="{ 'is-live': isVoiceActive }" />
-                {{ voiceButtonLabel }}
-              </button>
-              <p>{{ voiceErrorMessage || voiceHintText }}</p>
+          <div class="composer-shell">
+            <div class="composer-shell__header">
+              <label class="composer-label" for="elderly-input">描述当前情况</label>
+              <span>按 Enter 发送，Shift + Enter 换行</span>
             </div>
-            <button class="primary-button composer-submit" type="button" :disabled="loading || sending" @click="handleSend">
-              {{ sending ? '发送中...' : '发送' }}
-            </button>
+            <textarea
+              id="elderly-input"
+              v-model="inputText"
+              class="composer-textarea"
+              :disabled="loading || sending"
+              placeholder="例如：我今年 82 岁，最近走路容易喘，晚上睡眠一般，洗澡时需要家人帮忙。"
+              rows="4"
+              @keydown.enter.exact.prevent="handleSend"
+            />
+            <div class="composer-actions">
+              <div class="voice-panel">
+                <button
+                  class="secondary-button voice-button"
+                  type="button"
+                  :disabled="loading || !isVoiceAvailable"
+                  @click="toggleVoiceInput"
+                >
+                  <span class="voice-button__dot" :class="{ 'is-live': isVoiceActive }" />
+                  {{ voiceButtonLabel }}
+                </button>
+                <div class="voice-panel__copy">
+                  <strong>{{ isVoiceActive ? '正在聆听' : '语音输入' }}</strong>
+                  <p>{{ voiceErrorMessage || voiceHintText }}</p>
+                </div>
+              </div>
+              <button
+                class="primary-button composer-submit"
+                type="button"
+                :disabled="loading || sending"
+                @click="handleSend"
+              >
+                {{ sending ? '发送中...' : '发送' }}
+              </button>
+            </div>
           </div>
         </footer>
       </article>
@@ -1145,10 +1178,30 @@ onMounted(async () => {
 }
 
 .chat-card {
-  padding: 24px;
-  display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  position: relative;
+  overflow: hidden;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
   height: clamp(42rem, calc(100vh - 9.5rem), 52rem);
+  background:
+    radial-gradient(circle at top right, rgba(153, 220, 202, 0.18), transparent 24rem),
+    linear-gradient(180deg, rgba(252, 254, 255, 0.98), rgba(236, 247, 248, 0.94));
+}
+
+.chat-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.36), transparent 42%),
+    radial-gradient(circle at 12% 100%, rgba(83, 169, 183, 0.14), transparent 26%);
+  pointer-events: none;
+}
+
+.chat-card > * {
+  position: relative;
+  z-index: 1;
 }
 
 .chat-card__header {
@@ -1156,6 +1209,10 @@ onMounted(async () => {
   justify-content: space-between;
   gap: 16px;
   align-items: flex-start;
+}
+
+.chat-card__intro {
+  max-width: 35rem;
 }
 
 .chat-card__header-actions {
@@ -1166,15 +1223,15 @@ onMounted(async () => {
 }
 
 .chat-card__header h2 {
-  margin: 0;
+  margin: 10px 0 0;
   color: var(--ink-strong);
-  font-size: 1.8rem;
+  font-size: clamp(2rem, 3vw, 2.65rem);
 }
 
 .chat-card__header p {
   margin: 8px 0 0;
   color: var(--ink-muted);
-  font-size: 1.05rem;
+  font-size: 1rem;
 }
 
 .chat-card__header-actions p {
@@ -1183,6 +1240,38 @@ onMounted(async () => {
   line-height: 1.6;
   text-align: right;
   font-size: 0.95rem;
+}
+
+.chat-card__lead {
+  max-width: 32rem;
+  line-height: 1.8;
+}
+
+.chat-card__meta {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.chat-card__meta-pill {
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(83, 169, 183, 0.12);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 12px 28px rgba(47, 98, 114, 0.07);
+}
+
+.chat-card__meta-pill span {
+  color: var(--ink-muted);
+  font-size: 0.92rem;
+}
+
+.chat-card__meta-pill strong {
+  display: block;
+  margin-top: 8px;
+  color: var(--ink-strong);
+  font-size: 1.18rem;
 }
 
 .copy-id-button {
@@ -1201,36 +1290,95 @@ onMounted(async () => {
 
 .chat-stream {
   margin-top: 18px;
+  flex: 1;
   min-height: 0;
   overflow: auto;
   display: grid;
-  gap: 14px;
-  padding-right: 6px;
+  gap: 16px;
+  padding: 22px 18px;
+  padding-right: 12px;
+  border-radius: 28px;
+  border: 1px solid rgba(83, 169, 183, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(240, 248, 250, 0.88));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 18px 32px rgba(35, 84, 99, 0.05);
 }
 
 .message-bubble {
-  max-width: 90%;
-  padding: 18px 20px;
-  border-radius: 26px;
   display: grid;
-  gap: 10px;
-  box-shadow: 0 14px 30px rgba(35, 84, 99, 0.08);
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: flex-start;
+  max-width: 92%;
 }
 
 .message-bubble--assistant {
   justify-self: start;
-  background: rgba(255, 255, 255, 0.94);
 }
 
 .message-bubble--user {
   justify-self: end;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.message-bubble__avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.message-bubble--assistant .message-bubble__avatar {
+  background: linear-gradient(135deg, var(--brand), var(--brand-strong));
+  color: white;
+  box-shadow: 0 12px 24px rgba(43, 134, 150, 0.2);
+}
+
+.message-bubble--user .message-bubble__avatar {
+  order: 2;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(83, 169, 183, 0.18);
+  color: var(--brand-strong);
+}
+
+.message-bubble__panel {
+  padding: 16px 18px;
+  border-radius: 24px;
+  box-shadow: 0 14px 30px rgba(35, 84, 99, 0.08);
+}
+
+.message-bubble--assistant .message-bubble__panel {
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.message-bubble--user .message-bubble__panel {
   background: rgba(83, 169, 183, 0.14);
+}
+
+.message-bubble__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
 }
 
 .message-bubble__role {
   font-size: 0.85rem;
   font-weight: 700;
   color: var(--brand-strong);
+}
+
+.message-bubble__time {
+  color: var(--ink-muted);
+  font-size: 0.82rem;
 }
 
 .message-bubble__content {
@@ -1240,6 +1388,10 @@ onMounted(async () => {
 }
 
 .empty-tip {
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px dashed rgba(83, 169, 183, 0.24);
+  background: rgba(255, 255, 255, 0.62);
   align-self: center;
   justify-self: center;
   color: var(--ink-muted);
@@ -1247,8 +1399,28 @@ onMounted(async () => {
 
 .chat-composer {
   margin-top: 18px;
-  display: grid;
+}
+
+.composer-shell {
+  padding: 18px;
+  border-radius: 28px;
+  border: 1px solid rgba(83, 169, 183, 0.12);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 18px 34px rgba(47, 98, 114, 0.08);
+}
+
+.composer-shell__header {
+  display: flex;
+  justify-content: space-between;
   gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.composer-shell__header span {
+  color: var(--ink-muted);
+  font-size: 0.92rem;
 }
 
 .composer-label {
@@ -1258,57 +1430,75 @@ onMounted(async () => {
 
 .composer-textarea {
   resize: none;
-  border-radius: 24px;
+  border-radius: 22px;
   padding: 16px 18px;
   min-height: 120px;
+  line-height: 1.8;
+  border-color: rgba(83, 169, 183, 0.16);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 249, 252, 0.96));
 }
 
 .composer-actions {
+  margin-top: 14px;
   display: flex;
   justify-content: space-between;
-  gap: 18px;
-  align-items: flex-end;
+  gap: 14px;
+  align-items: center;
   flex-wrap: wrap;
 }
 
 .voice-panel {
-  display: grid;
-  gap: 10px;
-  color: var(--ink-muted);
+  display: flex;
+  align-items: center;
+  gap: 12px;
   flex: 1;
+  min-width: min(100%, 20rem);
+}
+
+.voice-panel__copy {
+  display: grid;
+  gap: 4px;
+}
+
+.voice-panel__copy strong {
+  color: var(--ink-strong);
+  font-size: 0.96rem;
 }
 
 .voice-panel p {
   margin: 0;
-  line-height: 1.7;
+  color: var(--ink-muted);
+  line-height: 1.6;
 }
 
 .voice-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-width: 5.5rem;
-  min-height: 2.75rem;
-  padding: 0 16px;
-  border-radius: 999px;
+  gap: 7px;
+  min-width: 4.6rem;
+  min-height: 2.4rem;
+  padding: 0 12px;
+  border-radius: 16px;
   font-weight: 700;
+  flex-shrink: 0;
 }
 
 .voice-button__dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 999px;
   background: rgba(83, 169, 183, 0.3);
 }
 
 .voice-button__dot.is-live {
   background: var(--brand-strong);
-  box-shadow: 0 0 0 6px rgba(83, 169, 183, 0.16);
+  box-shadow: 0 0 0 5px rgba(83, 169, 183, 0.14);
 }
 
 .composer-submit {
-  min-width: 8rem;
+  min-width: 7.6rem;
+  min-height: 3rem;
 }
 
 .side-panel {
@@ -1321,6 +1511,16 @@ onMounted(async () => {
 .stream-card,
 .report-detail-card {
   padding: 22px;
+}
+
+.summary-card {
+  background: linear-gradient(180deg, rgba(249, 252, 255, 0.9), rgba(237, 247, 248, 0.94));
+}
+
+.session-card,
+.stream-card,
+.report-detail-card {
+  background: rgba(248, 252, 255, 0.88);
 }
 
 .summary-card h1 {
@@ -1499,12 +1699,22 @@ onMounted(async () => {
 }
 
 @media (max-width: 720px) {
+  .chat-card {
+    padding: 20px;
+  }
+
+  .chat-card__meta,
   .summary-card__actions,
   .summary-stats {
     grid-template-columns: 1fr;
   }
 
+  .chat-stream {
+    padding: 18px 14px;
+  }
+
   .chat-card__header,
+  .composer-shell__header,
   .composer-actions {
     flex-direction: column;
     align-items: stretch;
@@ -1517,6 +1727,23 @@ onMounted(async () => {
 
   .chat-card__header-actions p {
     text-align: left;
+  }
+
+  .message-bubble {
+    max-width: 100%;
+  }
+
+  .message-bubble,
+  .message-bubble--user {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .message-bubble--user .message-bubble__avatar {
+    order: 0;
+  }
+
+  .voice-panel {
+    align-items: flex-start;
   }
 
   .session-item__actions {
