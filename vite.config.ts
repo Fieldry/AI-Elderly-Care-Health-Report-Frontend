@@ -39,6 +39,14 @@ export default defineConfig({
         target: proxyTarget,
         changeOrigin: true
       },
+      '/doctor/elderly-list': {
+        target: proxyTarget,
+        changeOrigin: true
+      },
+      '/doctor/elderly': {
+        target: proxyTarget,
+        changeOrigin: true
+      },
       '/ws': {
         target: proxyTarget,
         changeOrigin: true,
