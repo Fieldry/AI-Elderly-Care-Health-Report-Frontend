@@ -17,7 +17,6 @@ import {
 import { getElderlyProfile, getElderlyReportDetail } from '@/api/elderly'
 import { exportReportPdf, generateReport, streamGenerateReport } from '@/api/report'
 import ProfileOverview from '@/components/ProfileOverview.vue'
-import ReportSummary from '@/components/ReportSummary.vue'
 import { useGoogleStreamingSpeech } from '@/composables/useGoogleStreamingSpeech'
 import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
 import {
@@ -37,7 +36,7 @@ import type {
   ElderlyAuthSession,
   SessionMetadata
 } from '@/types'
-import { getReportGeneratedAt, getReportId, normalizeReportRecord } from '@/utils/report'
+import { getReportGeneratedAt, getReportId, normalizeLatestReport, normalizeReportRecord } from '@/utils/report'
 import { mergeProfileSnapshots } from '@/utils/report'
 
 const router = useRouter()
@@ -76,6 +75,56 @@ const activeReport = computed(() => {
   }
 
   return reports.value.find((item) => getReportId(item) === selectedReportId.value) || null
+})
+const selectedReportRecord = computed(() => {
+  const source = selectedReportDetail.value || activeReport.value || null
+  return source ? normalizeReportRecord(source) : null
+})
+const selectedReportView = computed(() =>
+  selectedReportRecord.value ? normalizeLatestReport([selectedReportRecord.value]) : null
+)
+const selectedReportPointSections = computed(() => {
+  const normalizedReport = selectedReportView.value
+  if (!normalizedReport) {
+    return []
+  }
+
+  const sections = normalizedReport.sections
+    .map((section) => ({
+      title: section.title,
+      items: Array.from(new Set(section.items.map((item) => item.trim()).filter(Boolean)))
+    }))
+    .filter((section) => section.items.length > 0)
+
+  const markdownPoints = extractReportPoints(normalizedReport.markdown).filter((item) => {
+    if (normalizedReport.summary && item === normalizedReport.summary.trim()) {
+      return false
+    }
+
+    return !sections.some((section) => section.items.includes(item))
+  })
+
+  if (markdownPoints.length > 0) {
+    sections.push({
+      title: '报告要点',
+      items: markdownPoints
+    })
+  }
+
+  if (sections.length > 0) {
+    return sections
+  }
+
+  if (normalizedReport.summary) {
+    return [
+      {
+        title: '报告摘要',
+        items: [normalizedReport.summary]
+      }
+    ]
+  }
+
+  return []
 })
 const elderlyUserId = computed(() => elderlyAccessSession.value?.userId || '')
 const progressPercentLabel = computed(() =>
@@ -161,6 +210,29 @@ const voiceHintText = computed(() => {
 
 function cloneJson<T>(value: T) {
   return JSON.parse(JSON.stringify(value)) as T
+}
+
+function extractReportPoints(markdown: string) {
+  if (!markdown.trim()) {
+    return []
+  }
+
+  return Array.from(
+    new Set(
+      markdown
+        .split(/\r?\n/)
+        .map((line) =>
+          line
+            .trim()
+            .replace(/^\s*(?:#{1,6}|[-*+]|>\s*|\d+[.)])\s*/, '')
+            .replace(/\*\*(.*?)\*\*/g, '$1')
+            .replace(/\*(.*?)\*/g, '$1')
+            .replace(/`([^`]+)`/g, '$1')
+            .trim()
+        )
+        .filter(Boolean)
+    )
+  )
 }
 
 function sortReportsByGeneratedAt(items: Array<Record<string, unknown>>) {
@@ -456,6 +528,10 @@ async function revealAssistantMessage(messageIndex: number, content: string) {
 function resetSelectedReport() {
   selectedReportId.value = ''
   selectedReportDetail.value = null
+}
+
+function closeReportModal() {
+  resetSelectedReport()
 }
 
 async function refreshSessions(token: string) {
@@ -1106,12 +1182,6 @@ onMounted(async () => {
         </section>
 
         <ProfileOverview :profile="profile" />
-        <ReportSummary
-          :reports="reports"
-          title="当前会话报告"
-          empty-title="当前会话尚无报告"
-          empty-description="完成对话采集后可直接生成报告，报告入口也会同步出现在上方会话列表中。"
-        />
 
         <section v-if="generatingReport && reportGenerationText" class="surface-card stream-card">
           <div class="panel-header">
@@ -1119,34 +1189,65 @@ onMounted(async () => {
           </div>
           <pre class="stream-card__content">{{ reportGenerationText }}</pre>
         </section>
+      </aside>
+    </section>
 
-        <section v-if="selectedReportId" class="surface-card report-detail-card">
-          <div class="panel-header">
-            <div>
-              <h3>报告详情</h3>
-              <p>{{ selectedReportLoading ? '正在同步当前报告内容' : selectedReportId }}</p>
-            </div>
+    <div v-if="selectedReportId" class="report-modal" @click.self="closeReportModal">
+      <article class="surface-card report-modal__card">
+        <header class="report-modal__header">
+          <div>
+            <p class="eyebrow">报告详情</p>
+            <h3>{{ selectedReportId }}</h3>
+            <p>
+              {{ selectedReportLoading ? '正在同步当前报告内容' : formatDateTime(selectedReportView?.generatedAt || '') }}
+            </p>
+          </div>
+
+          <div class="report-modal__actions">
             <button
-              class="ghost-button report-detail-card__download"
+              class="ghost-button report-modal__action"
               type="button"
               :disabled="selectedReportLoading || downloadingReportId === selectedReportId"
               @click="handleDownloadReport(selectedReportId)"
             >
               {{ downloadingReportId === selectedReportId ? '导出中...' : '导出 PDF' }}
             </button>
+            <button class="secondary-button report-modal__action" type="button" @click="closeReportModal">
+              关闭
+            </button>
           </div>
+        </header>
 
-          <div v-if="selectedReportLoading" class="session-card__empty">正在加载报告详情...</div>
-          <ReportSummary
-            v-else
-            :reports="[normalizeReportRecord(selectedReportDetail || activeReport || {}) || {}]"
-            title="当前报告"
-            empty-title="报告详情为空"
-            empty-description="当前报告没有返回可展示的结构化内容。"
-          />
-        </section>
-      </aside>
-    </section>
+        <div v-if="selectedReportLoading" class="report-modal__loading">正在加载报告详情...</div>
+
+        <div v-else-if="selectedReportView" class="report-modal__body">
+          <article v-if="selectedReportView.summary" class="report-modal__summary">
+            <strong>摘要</strong>
+            <p>{{ selectedReportView.summary }}</p>
+          </article>
+
+          <section
+            v-for="section in selectedReportPointSections"
+            :key="section.title"
+            class="report-modal__section"
+          >
+            <h4>{{ section.title }}</h4>
+            <ul class="report-modal__list">
+              <li v-for="item in section.items" :key="item">{{ item }}</li>
+            </ul>
+          </section>
+
+          <div
+            v-if="!selectedReportView.summary && selectedReportPointSections.length === 0"
+            class="report-modal__empty"
+          >
+            当前报告没有返回可展示的内容。
+          </div>
+        </div>
+
+        <div v-else class="report-modal__empty">当前报告没有返回可展示的内容。</div>
+      </article>
+    </div>
   </div>
 </template>
 
@@ -1494,8 +1595,7 @@ onMounted(async () => {
 
 .summary-card,
 .session-card,
-.stream-card,
-.report-detail-card {
+.stream-card {
   padding: 22px;
 }
 
@@ -1504,8 +1604,7 @@ onMounted(async () => {
 }
 
 .session-card,
-.stream-card,
-.report-detail-card {
+.stream-card {
   background: rgba(248, 252, 255, 0.88);
 }
 
@@ -1657,8 +1756,7 @@ onMounted(async () => {
   color: #2f7b63;
 }
 
-.session-item__action,
-.report-detail-card__download {
+.session-item__action {
   min-width: 6.75rem;
 }
 
@@ -1671,6 +1769,110 @@ onMounted(async () => {
   white-space: pre-wrap;
   max-height: 18rem;
   overflow: auto;
+}
+
+.report-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(20, 43, 61, 0.28);
+  backdrop-filter: blur(10px);
+}
+
+.report-modal__card {
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(80vh, 920px);
+  padding: 24px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(circle at top right, rgba(137, 207, 192, 0.12), transparent 18rem),
+    linear-gradient(180deg, rgba(254, 255, 255, 0.98), rgba(244, 250, 251, 0.96));
+  box-shadow: 0 32px 80px rgba(18, 45, 65, 0.24);
+}
+
+.report-modal__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.report-modal__header h3 {
+  margin: 10px 0 0;
+  color: var(--ink-strong);
+  font-size: clamp(1.55rem, 2.3vw, 2rem);
+}
+
+.report-modal__header p:last-child {
+  margin: 8px 0 0;
+  color: var(--ink-muted);
+}
+
+.report-modal__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.report-modal__action {
+  min-width: 6.75rem;
+}
+
+.report-modal__loading,
+.report-modal__empty {
+  margin-top: 20px;
+  padding: 18px 20px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(83, 169, 183, 0.12);
+  color: var(--ink-muted);
+}
+
+.report-modal__body {
+  margin-top: 20px;
+  display: grid;
+  gap: 16px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.report-modal__summary,
+.report-modal__section {
+  padding: 18px 20px;
+  border-radius: 22px;
+  border: 1px solid rgba(83, 169, 183, 0.12);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.report-modal__summary strong,
+.report-modal__section h4 {
+  margin: 0;
+  color: var(--ink-strong);
+}
+
+.report-modal__summary p {
+  margin: 10px 0 0;
+  color: var(--ink);
+  line-height: 1.8;
+}
+
+.report-modal__list {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 10px;
+}
+
+.report-modal__list li {
+  color: var(--ink);
+  line-height: 1.7;
 }
 
 @media (max-width: 1100px) {
@@ -1737,8 +1939,24 @@ onMounted(async () => {
   }
 
   .session-item__action,
-  .report-detail-card__download {
+  .report-modal__action {
     width: 100%;
+  }
+
+  .report-modal {
+    padding: 14px;
+  }
+
+  .report-modal__card {
+    width: 100%;
+    max-height: calc(100vh - 28px);
+    padding: 18px;
+  }
+
+  .report-modal__header,
+  .report-modal__actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
 </style>
