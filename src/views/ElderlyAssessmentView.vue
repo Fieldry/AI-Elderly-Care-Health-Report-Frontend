@@ -1084,9 +1084,6 @@ onMounted(async () => {
         <section class="surface-card summary-card">
           <p class="eyebrow">长者端</p>
           <h1>健康评估对话</h1>
-          <p class="summary-card__text">
-            用自然对话逐步采集老人健康信息，右侧保留当前状态、历次会话与报告入口，减少干扰项。
-          </p>
 
           <div class="summary-stats">
             <div class="summary-stat">
@@ -1145,7 +1142,6 @@ onMounted(async () => {
                   <strong>{{ getSessionLabel(item, index) }}</strong>
                   <span>{{ formatDateTime(item.created_at) }}</span>
                 </div>
-                <span class="session-item__marker">{{ item.session_id === sessionId ? '当前' : '历史' }}</span>
               </div>
 
               <div class="session-item__meta">
@@ -1153,19 +1149,8 @@ onMounted(async () => {
                   {{ getConversationStateText(item.session_id === sessionId ? conversationState : item.status) }}
                 </span>
                 <span class="status-chip" :class="{ 'status-chip--ready': hasSessionReport(item) }">
-                  {{ hasSessionReport(item) ? '已生成报告' : '未生成报告' }}
+                  {{ hasSessionReport(item) ? '报告已生成' : '报告未生成' }}
                 </span>
-              </div>
-
-              <div class="session-item__actions">
-                <button
-                  class="secondary-button session-item__action"
-                  type="button"
-                  :disabled="loading || item.session_id === sessionId"
-                  @click="switchSession(item.session_id)"
-                >
-                  {{ item.session_id === sessionId ? '正在查看' : '查看对话' }}
-                </button>
                 <button
                   v-if="hasSessionReport(item)"
                   class="ghost-button session-item__action"

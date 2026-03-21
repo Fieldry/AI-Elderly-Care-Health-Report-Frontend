@@ -240,7 +240,6 @@ onMounted(async () => {
           <div>
             <p class="eyebrow">家属端</p>
             <h1>关联老人</h1>
-            <p>左侧切换老人，右侧查看当前基本信息，并进入完整档案继续补全。</p>
           </div>
 
           <div class="record-list-card__actions">
@@ -289,7 +288,7 @@ onMounted(async () => {
             </div>
 
             <p class="record-item__summary">
-              已填写核心字段约 {{ Math.round(elderly.completion_rate * 100) }}%，点击查看当前基本信息。
+              已填写核心字段约 {{ Math.round(elderly.completion_rate * 100) }}%。
             </p>
           </button>
         </div>
