@@ -24,6 +24,18 @@ function asString(value: unknown) {
   return typeof value === 'string' ? value : ''
 }
 
+function asTimestampString(value: unknown) {
+  if (typeof value === 'string' && value.trim()) {
+    return value
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value).toISOString()
+  }
+
+  return ''
+}
+
 function asStringArray(value: unknown) {
   if (!Array.isArray(value)) {
     return []
@@ -108,11 +120,25 @@ export function getReportGeneratedAt(report: Record<string, unknown> | null | un
   }
 
   const payload = resolvePayload(report)
+  const metadata = asObject(payload.metadata)
+
   return (
-    asString(report.generated_at) ||
-    asString(report.generatedAt) ||
-    asString(payload.generated_at) ||
-    asString(payload.generatedAt)
+    asTimestampString(report.generated_at) ||
+    asTimestampString(report.generatedAt) ||
+    asTimestampString(report.created_at) ||
+    asTimestampString(report.createdAt) ||
+    asTimestampString(report.updated_at) ||
+    asTimestampString(report.updatedAt) ||
+    asTimestampString(report.report_time) ||
+    asTimestampString(report.reportTime) ||
+    asTimestampString(payload.generated_at) ||
+    asTimestampString(payload.generatedAt) ||
+    asTimestampString(payload.created_at) ||
+    asTimestampString(payload.createdAt) ||
+    asTimestampString(metadata?.generated_at) ||
+    asTimestampString(metadata?.generatedAt) ||
+    asTimestampString(metadata?.created_at) ||
+    asTimestampString(metadata?.createdAt)
   )
 }
 

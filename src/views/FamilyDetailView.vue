@@ -362,6 +362,7 @@ onMounted(async () => {
 }
 
 .detail-layout {
+  --workspace-panel-height: min(44rem, calc(100dvh - 11rem));
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.88fr);
   gap: 20px;
@@ -371,7 +372,7 @@ onMounted(async () => {
 .detail-form-card,
 .reports-shell,
 .loading-card {
-  padding: 22px;
+  padding: 20px;
 }
 
 .detail-form-card__header,
@@ -399,23 +400,31 @@ onMounted(async () => {
   line-height: 1.7;
 }
 
-.detail-form-card__actions {
+  .detail-form-card__actions {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
 }
 
+.detail-form-card {
+  height: var(--workspace-panel-height);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .detail-form {
-  margin-top: 18px;
-  max-height: 62rem;
+  margin-top: 16px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
-  padding-right: 8px;
+  padding-right: 6px;
   display: grid;
-  gap: 18px;
+  gap: 14px;
 }
 
 .form-group-card {
-  padding: 18px;
+  padding: 16px;
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.78);
   border: 1px solid rgba(120, 164, 199, 0.16);
@@ -430,7 +439,7 @@ onMounted(async () => {
 .field-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 14px;
+  gap: 12px;
 }
 
 .field {
@@ -453,6 +462,14 @@ onMounted(async () => {
 .detail-side {
   display: grid;
   gap: 18px;
+  min-height: 0;
+}
+
+.reports-shell {
+  height: var(--workspace-panel-height);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .reports-shell__header h3 {
@@ -462,10 +479,12 @@ onMounted(async () => {
 
 .report-list {
   margin-top: 16px;
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   gap: 12px;
-  max-height: 24rem;
   overflow: auto;
+  padding-right: 6px;
 }
 
 .report-item {
@@ -513,6 +532,7 @@ onMounted(async () => {
 @media (max-width: 980px) {
   .detail-layout {
     grid-template-columns: 1fr;
+    --workspace-panel-height: auto;
   }
 }
 
