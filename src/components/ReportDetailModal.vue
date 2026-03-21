@@ -6,6 +6,7 @@ import { normalizeLatestReport, normalizeReportRecord } from '@/utils/report'
 const props = withDefaults(
   defineProps<{
     reportId: string
+    reportTitle?: string
     report: Record<string, unknown> | null | undefined
     loading?: boolean
     downloading?: boolean
@@ -125,7 +126,7 @@ function formatDateTime(value: string) {
       <header class="report-modal__header">
         <div>
           <p class="eyebrow">报告详情</p>
-          <h3>{{ reportId }}</h3>
+          <h3>{{ reportTitle || reportId }}</h3>
           <p>{{ loading ? '正在同步当前报告内容' : formatDateTime(normalizedReport?.generatedAt || '') }}</p>
         </div>
 

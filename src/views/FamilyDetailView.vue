@@ -15,7 +15,7 @@ import {
   PROFILE_GROUPS,
   serializeProfilePayload
 } from '@/utils/profile'
-import { getReportGeneratedAt, getReportId } from '@/utils/report'
+import { getReportGeneratedAt, getReportId, getSequentialReportName } from '@/utils/report'
 
 const props = defineProps<{
   elderlyId: string
@@ -56,6 +56,14 @@ const activeReport = computed(() => {
   }
 
   return familyReports.value.find((report) => getReportId(report) === selectedReportId.value) || null
+})
+const selectedReportTitle = computed(() => {
+  if (!selectedReportId.value) {
+    return '历史报告'
+  }
+
+  const reportIndex = sortedReports.value.findIndex((report) => getReportId(report) === selectedReportId.value)
+  return getSequentialReportName(reportIndex + 1)
 })
 
 function formatDateTime(value: string) {
@@ -309,12 +317,12 @@ onMounted(async () => {
 
           <div v-if="sortedReports.length > 0" class="report-list scroll-panel">
             <article
-              v-for="report in sortedReports"
+              v-for="(report, index) in sortedReports"
               :key="getReportId(report) || JSON.stringify(report)"
               class="report-item"
             >
               <div>
-                <strong>{{ getReportId(report) || '未命名报告' }}</strong>
+                <strong>{{ getSequentialReportName(index + 1) }}</strong>
                 <p>{{ formatDateTime(getReportGeneratedAt(report)) }}</p>
               </div>
               <div class="report-item__actions">
@@ -345,6 +353,7 @@ onMounted(async () => {
     <ReportDetailModal
       v-if="selectedReportId"
       :report-id="selectedReportId"
+      :report-title="selectedReportTitle"
       :report="selectedReportDetail || activeReport || null"
       :loading="reportDetailLoading"
       :downloading="downloadingReportId === selectedReportId"

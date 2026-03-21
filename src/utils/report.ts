@@ -114,6 +114,11 @@ export function getReportId(report: Record<string, unknown> | null | undefined) 
   )
 }
 
+export function getSequentialReportName(order: number, prefix = '历史报告') {
+  const normalizedOrder = Number.isFinite(order) && order > 0 ? Math.floor(order) : 1
+  return `${prefix} ${normalizedOrder}`
+}
+
 export function getReportGeneratedAt(report: Record<string, unknown> | null | undefined) {
   if (!report) {
     return ''
