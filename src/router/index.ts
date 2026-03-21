@@ -69,6 +69,16 @@ const router = createRouter({
       }
     },
     {
+      path: '/doctor/elderly/:elderlyId',
+      name: 'doctor-elderly-detail',
+      component: () => import('@/views/DoctorDetailView.vue'),
+      props: true,
+      meta: {
+        requiresAuth: true,
+        roles: ['doctor']
+      }
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: '/'
     }
