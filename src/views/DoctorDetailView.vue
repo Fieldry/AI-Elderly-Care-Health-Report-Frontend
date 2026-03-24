@@ -2,7 +2,6 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { getSessionDetail } from '@/api/chat'
 import { ApiError } from '@/api/core'
 import {
   createDoctorFollowup,
@@ -14,7 +13,7 @@ import EmptyStateCard from '@/components/EmptyStateCard.vue'
 import ProfileOverview from '@/components/ProfileOverview.vue'
 import ReportDetailModal from '@/components/ReportDetailModal.vue'
 import { useAuthSession } from '@/session'
-import type { ChatMessage, DoctorElderlyDetail } from '@/types'
+import type { DoctorElderlyDetail } from '@/types'
 import { getIdentityTitle } from '@/utils/profile'
 import { getReportGeneratedAt, getReportId, getSequentialReportName } from '@/utils/report'
 
@@ -33,7 +32,6 @@ const router = useRouter()
 const { session } = useAuthSession()
 
 const selectedDetail = ref<DoctorElderlyDetail | null>(null)
-const latestConversation = ref<ChatMessage[]>([])
 const detailLoading = ref(false)
 const managementSaving = ref(false)
 const followupSaving = ref(false)
@@ -194,20 +192,6 @@ function applyManagementForm(detail: DoctorElderlyDetail) {
   managementForm.nextFollowupAt = formatDateTimeLocalInput(detail.management.next_followup_at)
 }
 
-async function loadLatestConversation(sessionId: string) {
-  if (!doctorToken.value || !sessionId) {
-    latestConversation.value = []
-    return
-  }
-
-  try {
-    const sessionDetail = await getSessionDetail(sessionId, doctorToken.value)
-    latestConversation.value = (sessionDetail.conversation || []).slice(-6)
-  } catch {
-    latestConversation.value = []
-  }
-}
-
 async function openReportDetail(reportId: string) {
   if (!doctorToken.value || !reportId) {
     return
@@ -247,12 +231,9 @@ async function loadDoctorDetail() {
       selectedReportId.value = ''
       selectedReportDetail.value = null
     }
-
-    await loadLatestConversation(detail.sessions[0]?.session_id || '')
   } catch (error) {
     errorMessage.value = getDoctorErrorMessage(error, '加载老人详情失败，请稍后重试。')
     selectedDetail.value = null
-    latestConversation.value = []
   } finally {
     detailLoading.value = false
   }
@@ -370,64 +351,6 @@ onMounted(async () => {
 
     <section v-else-if="selectedDetail" class="doctor-detail-layout">
       <div class="doctor-main-column">
-        <section class="surface-card detail-card">
-          <header class="detail-card__header">
-            <div>
-              <p class="eyebrow">当前老人</p>
-              <p class="detail-card__meta">
-                更新时间：{{ formatDateTime(selectedDetail.updated_at || selectedDetail.created_at) }}
-              </p>
-            </div>
-
-            <div class="detail-card__actions">
-              <button class="secondary-button" type="button" @click="router.push('/doctor/hub')">返回总览</button>
-            </div>
-          </header>
-
-          <div class="overview-grid">
-            <article class="overview-card">
-              <span>当前风险</span>
-              <strong>{{ formatRiskLevel(selectedOverview?.current_risk_level) }}</strong>
-            </article>
-            <article class="overview-card">
-              <span>管理状态</span>
-              <strong>{{ formatManagementStatus(selectedDetail.management.management_status) }}</strong>
-            </article>
-            <article class="overview-card">
-              <span>功能状态</span>
-              <strong>{{ selectedOverview?.functional_status_text || '暂无' }}</strong>
-            </article>
-            <article class="overview-card">
-              <span>慢病摘要</span>
-              <strong>{{ selectedOverview?.chronic_summary || '暂无' }}</strong>
-            </article>
-          </div>
-
-          <div v-if="(selectedOverview?.risk_tags || []).length > 0" class="chip-list">
-            <span v-for="tag in selectedOverview?.risk_tags" :key="tag" class="chip">{{ tag }}</span>
-          </div>
-
-          <div class="overview-columns">
-            <section>
-              <h2>主要问题</h2>
-              <ul v-if="(selectedOverview?.main_problems || []).length > 0" class="plain-list">
-                <li v-for="item in selectedOverview?.main_problems" :key="item">{{ item }}</li>
-              </ul>
-              <p v-else class="muted-text">暂无主要问题摘要。</p>
-            </section>
-
-            <section>
-              <h2>建议动作</h2>
-              <ul v-if="(selectedOverview?.recommended_actions || []).length > 0" class="plain-list">
-                <li v-for="item in selectedOverview?.recommended_actions" :key="item">{{ item }}</li>
-              </ul>
-              <p v-else class="muted-text">暂无建议动作。</p>
-            </section>
-          </div>
-        </section>
-
-        <ProfileOverview :profile="selectedDetail.profile" title="患者画像" />
-
         <section class="surface-card report-list-card">
           <header class="section-header">
             <div>
@@ -468,148 +391,209 @@ onMounted(async () => {
             description="当前老人还没有已生成的报告。"
           />
         </section>
+
+        <ProfileOverview :profile="selectedDetail.profile" title="患者画像" />
       </div>
 
       <aside class="doctor-management-column">
-        <section class="surface-card management-card">
-          <header class="section-header">
+        <section class="surface-card clinician-card">
+          <header class="detail-card__header">
             <div>
-              <h3>医生管理状态</h3>
-              <p>这部分仅写入医生侧管理表，不会改写老人画像。</p>
+              <p class="eyebrow">当前老人</p>
+              <h1>{{ selectedTitle }}</h1>
+              <p class="detail-card__meta">
+                更新时间：{{ formatDateTime(selectedDetail.updated_at || selectedDetail.created_at) }}
+              </p>
+            </div>
+
+            <div class="detail-card__actions">
+              <button class="secondary-button" type="button" @click="router.push('/doctor/hub')">返回总览</button>
             </div>
           </header>
 
-          <form class="form-grid" @submit.prevent="saveManagement">
-            <label class="field field--checkbox">
-              <input v-model="managementForm.isKeyCase" type="checkbox" />
-              <span>标记为重点个案</span>
-            </label>
-
-            <label class="field">
-              <span>管理状态</span>
-              <select v-model="managementForm.managementStatus">
-                <option v-for="option in managementStatusOptions" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
-
-            <label class="field field--checkbox">
-              <input v-model="managementForm.contactedFamily" type="checkbox" />
-              <span>已联系家属</span>
-            </label>
-
-            <label class="field field--checkbox">
-              <input v-model="managementForm.arrangedRevisit" type="checkbox" />
-              <span>已安排复诊/复评</span>
-            </label>
-
-            <label class="field field--checkbox">
-              <input v-model="managementForm.referred" type="checkbox" />
-              <span>已转诊</span>
-            </label>
-
-            <label class="field">
-              <span>下次随访时间</span>
-              <input v-model="managementForm.nextFollowupAt" type="datetime-local" />
-            </label>
-
-            <button class="primary-button form-submit" type="submit" :disabled="managementSaving">
-              {{ managementSaving ? '保存中...' : '保存管理状态' }}
-            </button>
-          </form>
-        </section>
-
-        <section class="surface-card followup-card">
-          <header class="section-header">
-            <div>
-              <h3>医生随访</h3>
-              <p>保存电话、门诊或上门随访记录，并同步刷新最近随访信息。</p>
+          <div class="clinician-card__body">
+            <div class="overview-grid">
+              <article class="overview-card">
+                <span>当前风险</span>
+                <strong>{{ formatRiskLevel(selectedOverview?.current_risk_level) }}</strong>
+              </article>
+              <article class="overview-card">
+                <span>管理状态</span>
+                <strong>{{ formatManagementStatus(selectedDetail.management.management_status) }}</strong>
+              </article>
+              <article class="overview-card">
+                <span>功能状态</span>
+                <strong>{{ selectedOverview?.functional_status_text || '暂无' }}</strong>
+              </article>
+              <article class="overview-card">
+                <span>慢病摘要</span>
+                <strong>{{ selectedOverview?.chronic_summary || '暂无' }}</strong>
+              </article>
             </div>
-          </header>
 
-          <div v-if="selectedDetail.followups.length > 0" class="panel-list scroll-panel">
-            <article
-              v-for="followup in selectedDetail.followups"
-              :key="followup.followup_id"
-              class="panel-item"
-            >
-              <div class="followup-item__top">
-                <strong>{{ followup.visit_type }}</strong>
-                <span>{{ formatDateTime(followup.created_at) }}</span>
+            <div v-if="(selectedOverview?.risk_tags || []).length > 0" class="chip-list">
+              <span v-for="tag in selectedOverview?.risk_tags" :key="tag" class="chip">{{ tag }}</span>
+            </div>
+
+            <div class="overview-columns">
+              <section class="workspace-section">
+                <h2>主要问题</h2>
+                <ul v-if="(selectedOverview?.main_problems || []).length > 0" class="plain-list">
+                  <li v-for="item in selectedOverview?.main_problems" :key="item">{{ item }}</li>
+                </ul>
+                <p v-else class="muted-text">暂无主要问题摘要。</p>
+              </section>
+
+              <section class="workspace-section">
+                <h2>建议动作</h2>
+                <ul v-if="(selectedOverview?.recommended_actions || []).length > 0" class="plain-list">
+                  <li v-for="item in selectedOverview?.recommended_actions" :key="item">{{ item }}</li>
+                </ul>
+                <p v-else class="muted-text">暂无建议动作。</p>
+              </section>
+            </div>
+
+            <section class="workspace-section">
+              <header class="section-header">
+                <div>
+                  <h3>医生管理状态</h3>
+                  <p>这部分仅写入医生侧管理表，不会改写老人画像。</p>
+                </div>
+              </header>
+
+              <form class="form-grid" @submit.prevent="saveManagement">
+                <label class="field field--checkbox">
+                  <input v-model="managementForm.isKeyCase" type="checkbox" />
+                  <span>标记为重点个案</span>
+                </label>
+
+                <label class="field">
+                  <span>管理状态</span>
+                  <select v-model="managementForm.managementStatus">
+                    <option v-for="option in managementStatusOptions" :key="option.value" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </label>
+
+                <label class="field field--checkbox">
+                  <input v-model="managementForm.contactedFamily" type="checkbox" />
+                  <span>已联系家属</span>
+                </label>
+
+                <label class="field field--checkbox">
+                  <input v-model="managementForm.arrangedRevisit" type="checkbox" />
+                  <span>已安排复诊/复评</span>
+                </label>
+
+                <label class="field field--checkbox">
+                  <input v-model="managementForm.referred" type="checkbox" />
+                  <span>已转诊</span>
+                </label>
+
+                <label class="field">
+                  <span>下次随访时间</span>
+                  <input v-model="managementForm.nextFollowupAt" type="datetime-local" />
+                </label>
+
+                <button class="primary-button form-submit" type="submit" :disabled="managementSaving">
+                  {{ managementSaving ? '保存中...' : '保存管理状态' }}
+                </button>
+              </form>
+            </section>
+
+            <section class="workspace-section">
+              <header class="section-header">
+                <div>
+                  <h3>医生随访</h3>
+                  <p>保存电话、门诊或上门随访记录，并同步刷新最近随访信息。</p>
+                </div>
+              </header>
+
+              <div v-if="selectedDetail.followups.length > 0" class="panel-list scroll-panel">
+                <article
+                  v-for="followup in selectedDetail.followups"
+                  :key="followup.followup_id"
+                  class="panel-item"
+                >
+                  <div class="followup-item__top">
+                    <strong>{{ followup.visit_type }}</strong>
+                    <span>{{ formatDateTime(followup.created_at) }}</span>
+                  </div>
+                  <p>{{ followup.findings }}</p>
+                  <ul v-if="followup.recommendations.length > 0" class="plain-list">
+                    <li v-for="item in followup.recommendations" :key="item">{{ item }}</li>
+                  </ul>
+                </article>
               </div>
-              <p>{{ followup.findings }}</p>
-              <ul v-if="followup.recommendations.length > 0" class="plain-list">
-                <li v-for="item in followup.recommendations" :key="item">{{ item }}</li>
-              </ul>
-            </article>
+
+              <EmptyStateCard
+                v-else
+                title="暂无随访记录"
+                description="当前老人还没有医生随访记录。"
+              />
+
+              <form class="form-grid followup-form" @submit.prevent="submitFollowup">
+                <label class="field">
+                  <span>随访方式</span>
+                  <select v-model="followupForm.visitType">
+                    <option v-for="option in visitTypeOptions" :key="option" :value="option">{{ option }}</option>
+                  </select>
+                </label>
+
+                <label class="field field--full">
+                  <span>本次发现</span>
+                  <textarea
+                    v-model="followupForm.findings"
+                    rows="4"
+                    placeholder="例如：近一周夜间起身增多，家属反馈步态较前变慢。"
+                  />
+                </label>
+
+                <label class="field field--full">
+                  <span>建议措施</span>
+                  <textarea
+                    v-model="followupForm.recommendationsText"
+                    rows="3"
+                    placeholder="每行一条建议，例如：两周内复评步态"
+                  />
+                </label>
+
+                <label class="field field--checkbox">
+                  <input v-model="followupForm.contactedFamily" type="checkbox" />
+                  <span>本次已联系家属</span>
+                </label>
+
+                <label class="field field--checkbox">
+                  <input v-model="followupForm.arrangedRevisit" type="checkbox" />
+                  <span>已安排复诊/复评</span>
+                </label>
+
+                <label class="field field--checkbox">
+                  <input v-model="followupForm.referred" type="checkbox" />
+                  <span>已转诊</span>
+                </label>
+
+                <label class="field">
+                  <span>下次随访时间</span>
+                  <input v-model="followupForm.nextFollowupAt" type="datetime-local" />
+                </label>
+
+                <label class="field field--full">
+                  <span>补充备注</span>
+                  <textarea
+                    v-model="followupForm.notes"
+                    rows="3"
+                    placeholder="例如：建议继续观察夜间如厕风险。"
+                  />
+                </label>
+
+                <button class="primary-button form-submit" type="submit" :disabled="followupSaving">
+                  {{ followupSaving ? '保存中...' : '保存随访记录' }}
+                </button>
+              </form>
+            </section>
           </div>
-
-          <EmptyStateCard
-            v-else
-            title="暂无随访记录"
-            description="当前老人还没有医生随访记录。"
-          />
-
-          <form class="form-grid followup-form" @submit.prevent="submitFollowup">
-            <label class="field">
-              <span>随访方式</span>
-              <select v-model="followupForm.visitType">
-                <option v-for="option in visitTypeOptions" :key="option" :value="option">{{ option }}</option>
-              </select>
-            </label>
-
-            <label class="field field--full">
-              <span>本次发现</span>
-              <textarea
-                v-model="followupForm.findings"
-                rows="4"
-                placeholder="例如：近一周夜间起身增多，家属反馈步态较前变慢。"
-              />
-            </label>
-
-            <label class="field field--full">
-              <span>建议措施</span>
-              <textarea
-                v-model="followupForm.recommendationsText"
-                rows="3"
-                placeholder="每行一条建议，例如：两周内复评步态"
-              />
-            </label>
-
-            <label class="field field--checkbox">
-              <input v-model="followupForm.contactedFamily" type="checkbox" />
-              <span>本次已联系家属</span>
-            </label>
-
-            <label class="field field--checkbox">
-              <input v-model="followupForm.arrangedRevisit" type="checkbox" />
-              <span>已安排复诊/复评</span>
-            </label>
-
-            <label class="field field--checkbox">
-              <input v-model="followupForm.referred" type="checkbox" />
-              <span>已转诊</span>
-            </label>
-
-            <label class="field">
-              <span>下次随访时间</span>
-              <input v-model="followupForm.nextFollowupAt" type="datetime-local" />
-            </label>
-
-            <label class="field field--full">
-              <span>补充备注</span>
-              <textarea
-                v-model="followupForm.notes"
-                rows="3"
-                placeholder="例如：建议继续观察夜间如厕风险。"
-              />
-            </label>
-
-            <button class="primary-button form-submit" type="submit" :disabled="followupSaving">
-              {{ followupSaving ? '保存中...' : '保存随访记录' }}
-            </button>
-          </form>
         </section>
       </aside>
     </section>
@@ -653,12 +637,8 @@ onMounted(async () => {
   gap: 18px;
 }
 
-.detail-card,
 .report-list-card,
-.session-card,
-.conversation-card,
-.management-card,
-.followup-card,
+.clinician-card,
 .loading-card {
   padding: 22px;
 }
@@ -702,6 +682,17 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+.clinician-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.clinician-card__body {
+  display: grid;
+  gap: 18px;
+}
+
 .overview-grid,
 .overview-columns {
   display: grid;
@@ -714,7 +705,7 @@ onMounted(async () => {
 }
 
 .overview-card,
-.overview-note,
+.workspace-section,
 .panel-item {
   padding: 18px 20px;
   border-radius: 22px;
@@ -730,11 +721,11 @@ onMounted(async () => {
 }
 
 .overview-card strong,
-.overview-note strong,
 .detail-card__header h1,
 .section-header h3,
 .panel-item strong,
-.overview-columns h2 {
+.overview-columns h2,
+.workspace-section h2 {
   color: var(--ink-strong);
 }
 
@@ -744,20 +735,10 @@ onMounted(async () => {
   font-size: 1rem;
 }
 
-.overview-note {
-  margin-top: 16px;
-}
-
-.overview-note p {
-  margin-top: 10px;
-  line-height: 1.8;
-}
-
 .chip-list {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-top: 16px;
 }
 
 .chip {
@@ -769,11 +750,11 @@ onMounted(async () => {
 }
 
 .overview-columns {
-  margin-top: 16px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.overview-columns h2 {
+.overview-columns h2,
+.workspace-section h2 {
   margin: 0 0 10px;
   font-size: 1.05rem;
 }
@@ -817,6 +798,10 @@ onMounted(async () => {
 
 .followup-form {
   margin-top: 18px;
+}
+
+.workspace-section :deep(.empty-state-card) {
+  margin-top: 16px;
 }
 
 .field {
@@ -899,12 +884,8 @@ onMounted(async () => {
 }
 
 @media (max-width: 760px) {
-  .detail-card,
   .report-list-card,
-  .session-card,
-  .conversation-card,
-  .management-card,
-  .followup-card,
+  .clinician-card,
   .loading-card {
     padding: 20px;
   }
