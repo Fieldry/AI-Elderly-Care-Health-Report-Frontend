@@ -374,7 +374,6 @@ onMounted(async () => {
           <header class="detail-card__header">
             <div>
               <p class="eyebrow">当前老人</p>
-              <h1>{{ selectedTitle }}</h1>
               <p class="detail-card__meta">
                 更新时间：{{ formatDateTime(selectedDetail.updated_at || selectedDetail.created_at) }}
               </p>
@@ -391,6 +390,10 @@ onMounted(async () => {
               <strong>{{ formatRiskLevel(selectedOverview?.current_risk_level) }}</strong>
             </article>
             <article class="overview-card">
+              <span>管理状态</span>
+              <strong>{{ formatManagementStatus(selectedDetail.management.management_status) }}</strong>
+            </article>
+            <article class="overview-card">
               <span>功能状态</span>
               <strong>{{ selectedOverview?.functional_status_text || '暂无' }}</strong>
             </article>
@@ -398,16 +401,7 @@ onMounted(async () => {
               <span>慢病摘要</span>
               <strong>{{ selectedOverview?.chronic_summary || '暂无' }}</strong>
             </article>
-            <article class="overview-card">
-              <span>管理状态</span>
-              <strong>{{ formatManagementStatus(selectedDetail.management.management_status) }}</strong>
-            </article>
           </div>
-
-          <article class="overview-note">
-            <strong>医生派生摘要</strong>
-            <p>{{ selectedOverview?.summary || '暂无最新报告总结。' }}</p>
-          </article>
 
           <div v-if="(selectedOverview?.risk_tags || []).length > 0" class="chip-list">
             <span v-for="tag in selectedOverview?.risk_tags" :key="tag" class="chip">{{ tag }}</span>
@@ -438,7 +432,6 @@ onMounted(async () => {
           <header class="section-header">
             <div>
               <h3>报告列表</h3>
-              <p>通过共享报告接口查看详情和导出状态。</p>
             </div>
             <span>{{ sortedReports.length }} 份</span>
           </header>
@@ -473,66 +466,6 @@ onMounted(async () => {
             v-else
             title="暂无报告记录"
             description="当前老人还没有已生成的报告。"
-          />
-        </section>
-
-        <section class="surface-card session-card">
-          <header class="section-header">
-            <div>
-              <h3>工作区会话</h3>
-              <p>展示该老人全部工作区元数据。</p>
-            </div>
-            <span>{{ selectedDetail.sessions.length }} 条</span>
-          </header>
-
-          <div v-if="selectedDetail.sessions.length > 0" class="panel-list scroll-panel">
-            <article
-              v-for="sessionItem in selectedDetail.sessions"
-              :key="sessionItem.session_id"
-              class="panel-item"
-            >
-              <div>
-                <strong>{{ sessionItem.title || `会话 ${sessionItem.session_id.slice(0, 8)}` }}</strong>
-                <p>{{ formatDateTime(sessionItem.created_at) }}</p>
-              </div>
-              <div class="session-flags">
-                <span>{{ sessionItem.has_profile ? '已有画像' : '画像待补齐' }}</span>
-                <span>{{ sessionItem.has_report ? '已有报告' : '暂无报告' }}</span>
-              </div>
-            </article>
-          </div>
-
-          <EmptyStateCard
-            v-else
-            title="暂无工作区会话"
-            description="当前老人尚未形成可读取的工作区会话。"
-          />
-        </section>
-
-        <section class="surface-card conversation-card">
-          <header class="section-header">
-            <div>
-              <h3>最近对话摘要</h3>
-              <p>基于最新工作区会话读取最后 6 条对话。</p>
-            </div>
-            <span>{{ latestConversation.length }} 条</span>
-          </header>
-
-          <div v-if="latestConversation.length > 0" class="panel-list scroll-panel">
-            <article
-              v-for="(message, index) in latestConversation"
-              :key="`${message.role}-${index}`"
-              class="panel-item conversation-item"
-            >
-              <strong>{{ message.role === 'assistant' ? '助手' : '用户' }}</strong>
-              <p>{{ message.content }}</p>
-            </article>
-          </div>
-
-          <EmptyStateCard
-            v-else
-            title="暂无可读对话"
-            description="当前最新工作区没有可展示的对话内容。"
           />
         </section>
       </div>
@@ -736,6 +669,7 @@ onMounted(async () => {
   justify-content: space-between;
   gap: 14px;
   align-items: flex-start;
+  margin-bottom: 18px;
 }
 
 .detail-card__header h1,
@@ -807,7 +741,7 @@ onMounted(async () => {
 .overview-card strong {
   display: block;
   margin-top: 10px;
-  font-size: 1.4rem;
+  font-size: 1rem;
 }
 
 .overview-note {
