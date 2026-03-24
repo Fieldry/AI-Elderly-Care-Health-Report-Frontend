@@ -139,6 +139,9 @@ const sessionStatusText = computed(() => {
 const isChatInputMode = computed(
   () => !currentInteraction.value || currentInteraction.value.kind === 'chat'
 )
+const showInteractionModal = computed(
+  () => Boolean(currentInteraction.value && !isChatInputMode.value)
+)
 const canConfirmReport = computed(
   () => currentInteraction.value?.kind === 'confirm' && !sending.value && !loading.value
 )
@@ -1321,100 +1324,11 @@ onMounted(async () => {
 
             <template v-else-if="currentInteraction">
               <div class="composer-shell__header">
-                <span class="composer-label">{{ currentInteraction.groupName }}</span>
+                <span class="composer-label">{{ currentInteraction.groupName || '当前题卡' }}</span>
               </div>
-              <div class="interaction-card">
-                <p class="interaction-card__prompt">{{ currentInteraction.prompt }}</p>
-
-                <div v-if="currentInteraction.kind === 'single_choice' && currentInteraction.field" class="choice-grid">
-                  <button
-                    v-for="option in interactionOptions"
-                    :key="option.value"
-                    class="choice-chip"
-                    :class="{ 'is-selected': isInteractionValueSelected(currentInteraction.field, option.value) }"
-                    type="button"
-                    @click="setInteractionFieldValue(currentInteraction.field, option.value)"
-                  >
-                    {{ option.label }}
-                  </button>
-                </div>
-
-                <div v-else-if="currentInteraction.kind === 'matrix_single_choice'" class="matrix-card">
-                  <div v-for="item in interactionItems" :key="item.key" class="matrix-row">
-                    <p class="matrix-row__label">{{ item.label }}</p>
-                    <div class="choice-grid choice-grid--compact">
-                      <button
-                        v-for="option in interactionOptions"
-                        :key="`${item.key}-${option.value}`"
-                        class="choice-chip choice-chip--small"
-                        :class="{ 'is-selected': isInteractionValueSelected(item.key, option.value) }"
-                        type="button"
-                        @click="setInteractionFieldValue(item.key, option.value)"
-                      >
-                        {{ option.label }}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div v-else-if="currentInteraction.kind === 'multi_select'" class="multi-card">
-                  <button
-                    v-for="item in interactionItems"
-                    :key="item.key"
-                    class="choice-chip choice-chip--check"
-                    :class="{ 'is-selected': Array.isArray(interactionValues.selected) && interactionValues.selected.includes(item.key) }"
-                    type="button"
-                    @click="toggleInteractionMultiSelect(item.key)"
-                  >
-                    {{ item.label }}
-                  </button>
-                </div>
-
-                <div v-else-if="currentInteraction.kind === 'form_card'" class="form-card">
-                  <label v-for="field in interactionFields" :key="field.key" class="form-card__field">
-                    <span>{{ field.label }}</span>
-                    <select
-                      class="composer-select"
-                      :value="getInteractionFieldValue(field.key)"
-                      @change="setInteractionFieldValue(field.key, String(($event.target as HTMLSelectElement).value || ''))"
-                    >
-                      <option value="">请选择</option>
-                      <option v-for="option in field.options || []" :key="option.value" :value="option.value">
-                        {{ option.label }}
-                      </option>
-                    </select>
-                    <input
-                      v-if="field.custom_key && getInteractionFieldValue(field.key) === '其他'"
-                      class="composer-input"
-                      :value="getInteractionFieldValue(field.custom_key)"
-                      :placeholder="field.placeholder || '请补充说明'"
-                      @input="setInteractionFieldValue(field.custom_key, String(($event.target as HTMLInputElement).value || ''))"
-                    />
-                  </label>
-                </div>
-
-                <div v-else-if="currentInteraction.kind === 'confirm'" class="confirm-card">
-                  <button class="primary-button composer-submit" type="button" :disabled="sending" @click="handleConfirmChoice('confirm')">
-                    {{ sending || generatingReport ? '生成中...' : '确认生成报告' }}
-                  </button>
-                  <button class="secondary-button composer-submit" type="button" :disabled="sending" @click="handleConfirmChoice('modify')">
-                    修改信息
-                  </button>
-                </div>
-
-                <div
-                  v-if="currentInteraction.kind !== 'confirm'"
-                  class="composer-actions composer-actions--card"
-                >
-                  <button
-                    class="primary-button composer-submit"
-                    type="button"
-                    :disabled="loading || sending"
-                    @click="handleCurrentInteractionSubmit"
-                  >
-                    {{ sending ? '提交中...' : (currentInteraction.submitLabel || '提交答案') }}
-                  </button>
-                </div>
+              <div class="interaction-pending">
+                <p class="interaction-pending__title">当前有待完成的题卡</p>
+                <p class="interaction-pending__text">请在屏幕中央完成选择后继续当前评估。</p>
               </div>
             </template>
           </div>
@@ -1511,6 +1425,118 @@ onMounted(async () => {
 
       </aside>
     </section>
+
+    <div v-if="showInteractionModal && currentInteraction" class="interaction-modal">
+      <article
+        class="surface-card interaction-modal__card"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="currentInteraction.groupName || '选择题卡片'"
+      >
+        <header class="interaction-modal__header">
+          <div>
+            <p class="eyebrow">{{ currentInteraction.groupName || '题卡问题' }}</p>
+            <h3>{{ currentInteraction.kind === 'confirm' ? '请确认当前信息' : '请完成当前题目' }}</h3>
+          </div>
+        </header>
+
+        <div class="interaction-modal__body">
+          <div class="interaction-card">
+            <p class="interaction-card__prompt interaction-modal__prompt">{{ currentInteraction.prompt }}</p>
+
+            <div v-if="currentInteraction.kind === 'single_choice' && currentInteraction.field" class="choice-grid">
+              <button
+                v-for="option in interactionOptions"
+                :key="option.value"
+                class="choice-chip"
+                :class="{ 'is-selected': isInteractionValueSelected(currentInteraction.field, option.value) }"
+                type="button"
+                @click="setInteractionFieldValue(currentInteraction.field, option.value)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+
+            <div v-else-if="currentInteraction.kind === 'matrix_single_choice'" class="matrix-card">
+              <div v-for="item in interactionItems" :key="item.key" class="matrix-row">
+                <p class="matrix-row__label">{{ item.label }}</p>
+                <div class="choice-grid choice-grid--compact">
+                  <button
+                    v-for="option in interactionOptions"
+                    :key="`${item.key}-${option.value}`"
+                    class="choice-chip choice-chip--small"
+                    :class="{ 'is-selected': isInteractionValueSelected(item.key, option.value) }"
+                    type="button"
+                    @click="setInteractionFieldValue(item.key, option.value)"
+                  >
+                    {{ option.label }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div v-else-if="currentInteraction.kind === 'multi_select'" class="multi-card">
+              <button
+                v-for="item in interactionItems"
+                :key="item.key"
+                class="choice-chip choice-chip--check"
+                :class="{ 'is-selected': Array.isArray(interactionValues.selected) && interactionValues.selected.includes(item.key) }"
+                type="button"
+                @click="toggleInteractionMultiSelect(item.key)"
+              >
+                {{ item.label }}
+              </button>
+            </div>
+
+            <div v-else-if="currentInteraction.kind === 'form_card'" class="form-card">
+              <label v-for="field in interactionFields" :key="field.key" class="form-card__field">
+                <span>{{ field.label }}</span>
+                <select
+                  class="composer-select"
+                  :value="getInteractionFieldValue(field.key)"
+                  @change="setInteractionFieldValue(field.key, String(($event.target as HTMLSelectElement).value || ''))"
+                >
+                  <option value="">请选择</option>
+                  <option v-for="option in field.options || []" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+                <input
+                  v-if="field.custom_key && getInteractionFieldValue(field.key) === '其他'"
+                  class="composer-input"
+                  :value="getInteractionFieldValue(field.custom_key)"
+                  :placeholder="field.placeholder || '请补充说明'"
+                  @input="setInteractionFieldValue(field.custom_key, String(($event.target as HTMLInputElement).value || ''))"
+                />
+              </label>
+            </div>
+
+            <div v-else-if="currentInteraction.kind === 'confirm'" class="confirm-card">
+              <button class="primary-button composer-submit" type="button" :disabled="sending" @click="handleConfirmChoice('confirm')">
+                {{ sending || generatingReport ? '生成中...' : '确认生成报告' }}
+              </button>
+              <button class="secondary-button composer-submit" type="button" :disabled="sending" @click="handleConfirmChoice('modify')">
+                修改信息
+              </button>
+            </div>
+
+            <div
+              v-if="currentInteraction.kind !== 'confirm'"
+              class="composer-actions composer-actions--card"
+            >
+              <button
+                class="primary-button composer-submit"
+                type="button"
+                :disabled="loading || sending"
+                @click="handleCurrentInteractionSubmit"
+              >
+                {{ sending ? '提交中...' : (currentInteraction.submitLabel || '提交答案') }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </article>
+    </div>
 
     <div v-if="selectedReportId" class="report-modal" @click.self="closeReportModal">
       <article class="surface-card report-modal__card">
@@ -1850,6 +1876,29 @@ onMounted(async () => {
   gap: 16px;
 }
 
+.interaction-pending {
+  padding: 18px 20px;
+  border-radius: 24px;
+  border: 1px dashed rgba(83, 169, 183, 0.24);
+  background: linear-gradient(180deg, rgba(247, 251, 253, 0.96), rgba(239, 247, 249, 0.92));
+}
+
+.interaction-pending__title,
+.interaction-pending__text {
+  margin: 0;
+}
+
+.interaction-pending__title {
+  color: var(--ink-strong);
+  font-weight: 700;
+}
+
+.interaction-pending__text {
+  margin-top: 6px;
+  color: var(--ink-muted);
+  line-height: 1.7;
+}
+
 .interaction-card__prompt {
   margin: 0;
   color: var(--ink-strong);
@@ -2186,6 +2235,120 @@ onMounted(async () => {
   overflow: auto;
 }
 
+.interaction-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 38;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(20, 43, 61, 0.22);
+  backdrop-filter: blur(9px);
+}
+
+.interaction-modal__card {
+  width: min(860px, calc(100vw - 40px));
+  max-height: min(84vh, 960px);
+  padding: 30px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(circle at top right, rgba(137, 207, 192, 0.14), transparent 18rem),
+    linear-gradient(180deg, rgba(254, 255, 255, 0.99), rgba(242, 249, 250, 0.97));
+  box-shadow: 0 34px 80px rgba(18, 45, 65, 0.22);
+}
+
+.interaction-modal__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.interaction-modal__header h3 {
+  margin: 10px 0 0;
+  color: var(--ink-strong);
+  font-size: clamp(1.85rem, 2.8vw, 2.4rem);
+}
+
+.interaction-modal__body {
+  margin-top: 22px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.interaction-modal__prompt {
+  font-size: clamp(1.08rem, 1.5vw, 1.26rem);
+  line-height: 1.85;
+}
+
+.interaction-modal :deep(.eyebrow) {
+  font-size: 0.96rem;
+}
+
+.interaction-modal .interaction-card {
+  gap: 20px;
+}
+
+.interaction-modal .choice-grid {
+  gap: 14px;
+}
+
+.interaction-modal .choice-chip {
+  min-height: 3.35rem;
+  padding: 0.82rem 1.32rem;
+  border-radius: 22px;
+  font-size: 1.06rem;
+}
+
+.interaction-modal .choice-chip--small {
+  min-height: 3rem;
+  padding: 0.72rem 1.12rem;
+}
+
+.interaction-modal .choice-chip--check {
+  border-radius: 22px;
+}
+
+.interaction-modal .matrix-card,
+.interaction-modal .form-card {
+  gap: 16px;
+}
+
+.interaction-modal .matrix-row {
+  gap: 14px;
+  padding: 18px;
+}
+
+.interaction-modal .matrix-row__label,
+.interaction-modal .form-card__field span {
+  font-size: 1.04rem;
+}
+
+.interaction-modal .composer-select,
+.interaction-modal .composer-input {
+  min-height: 3.3rem;
+  padding: 0.98rem 1.08rem;
+  border-radius: 18px;
+  font-size: 1.02rem;
+}
+
+.interaction-modal .confirm-card {
+  gap: 14px;
+}
+
+.interaction-modal .composer-actions--card {
+  margin-top: 4px;
+}
+
+.interaction-modal .composer-submit {
+  min-width: 8.8rem;
+  min-height: 3.3rem;
+  font-size: 1.03rem;
+}
+
 .report-modal {
   position: fixed;
   inset: 0;
@@ -2356,6 +2519,21 @@ onMounted(async () => {
   .session-item__action,
   .report-modal__action {
     width: 100%;
+  }
+
+  .interaction-modal {
+    padding: 14px;
+  }
+
+  .interaction-modal__card {
+    width: 100%;
+    max-height: calc(100vh - 28px);
+    padding: 20px;
+  }
+
+  .interaction-modal__header {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .report-modal {
