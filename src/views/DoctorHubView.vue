@@ -330,36 +330,38 @@ onMounted(async () => {
             </div>
           </header>
 
-          <div class="overview-grid">
-            <article class="overview-card">
-              <span>当前风险</span>
-              <strong>{{ formatRiskLevel(selectedOverview?.current_risk_level) }}</strong>
+          <div class="doctor-summary-card__body scroll-panel">
+            <div class="overview-grid">
+              <article class="overview-card">
+                <span>当前风险</span>
+                <strong>{{ formatRiskLevel(selectedOverview?.current_risk_level) }}</strong>
+              </article>
+              <article class="overview-card">
+                <span>管理状态</span>
+                <strong>{{ formatManagementStatus(selectedDetail.management.management_status) }}</strong>
+              </article>
+            </div>
+
+            <article class="overview-note">
+              <p class="overview-note__label">功能状态</p>
+              <p class="overview-note__content">{{ selectedOverview?.functional_status_text || '暂无' }}</p>
             </article>
-            <article class="overview-card">
-              <span>管理状态</span>
-              <strong>{{ formatManagementStatus(selectedDetail.management.management_status) }}</strong>
+
+            <article class="overview-note overview-note--full">
+              <p class="overview-note__label">风险因素</p>
+              <ul v-if="selectedRiskFactors.length > 0" class="overview-note__list">
+                <li v-for="item in selectedRiskFactors" :key="item.id">
+                  <p class="overview-note__item-label">
+                    {{ item.timeframeLabel }}<span v-if="item.timeframe"> · {{ item.timeframe }}</span>
+                  </p>
+                  <p class="overview-note__item-content">
+                    {{ item.name }}<span v-if="item.description">：{{ item.description }}</span>
+                  </p>
+                </li>
+              </ul>
+              <p v-else class="overview-note__content">暂无明确风险因素</p>
             </article>
           </div>
-
-          <article class="overview-note">
-            <p class="overview-note__label">功能状态</p>
-            <p class="overview-note__content">{{ selectedOverview?.functional_status_text || '暂无' }}</p>
-          </article>
-
-          <article class="overview-note overview-note--full">
-            <p class="overview-note__label">风险因素</p>
-            <ul v-if="selectedRiskFactors.length > 0" class="overview-note__list">
-              <li v-for="item in selectedRiskFactors" :key="item.id">
-                <p class="overview-note__item-label">
-                  {{ item.timeframeLabel }}<span v-if="item.timeframe"> · {{ item.timeframe }}</span>
-                </p>
-                <p class="overview-note__item-content">
-                  {{ item.name }}<span v-if="item.description">：{{ item.description }}</span>
-                </p>
-              </li>
-            </ul>
-            <p v-else class="overview-note__content">暂无明确风险因素</p>
-          </article>
 
         </article>
 
@@ -378,13 +380,15 @@ onMounted(async () => {
 .doctor-page {
   display: grid;
   gap: 18px;
+  min-height: calc(100dvh - 8.5rem);
 }
 
 .doctor-layout {
+  --workspace-panel-height: calc(100dvh - 8.5rem);
   display: grid;
   grid-template-columns: minmax(300px, 0.82fr) minmax(0, 1.18fr);
   gap: 20px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .record-list-card,
@@ -455,11 +459,20 @@ onMounted(async () => {
   background: rgba(255, 255, 255, 0.94);
 }
 
+.record-list-card {
+  height: var(--workspace-panel-height);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .record-list {
   margin-top: 16px;
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
+  align-content: start;
   gap: 12px;
-  max-height: 65rem;
   overflow: auto;
   padding-right: 6px;
 }
@@ -492,9 +505,27 @@ onMounted(async () => {
 }
 
 .doctor-summary-card {
-  display: grid;
-  gap: 18px;
+  height: var(--workspace-panel-height);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   cursor: pointer;
+}
+
+.doctor-summary {
+  min-height: 0;
+}
+
+.doctor-summary-card__body {
+  margin-top: 18px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding-right: 6px;
 }
 
 .doctor-summary-card h2 {
@@ -615,6 +646,14 @@ onMounted(async () => {
   .doctor-layout,
   .overview-columns {
     grid-template-columns: 1fr;
+  }
+
+  .doctor-page {
+    min-height: auto;
+  }
+
+  .doctor-layout {
+    --workspace-panel-height: auto;
   }
 }
 
