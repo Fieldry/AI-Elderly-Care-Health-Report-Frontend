@@ -237,6 +237,14 @@ export function normalizeLatestReport(reports: Array<Record<string, unknown>> | 
     }
   }
 
+  const warmMessage = asString(payload.warmMessage)
+  if (warmMessage) {
+    sections.push({
+      title: '温馨寄语',
+      items: [warmMessage]
+    })
+  }
+
   return {
     generatedAt: asString(latest.generated_at || latest.generatedAt),
     summary,
