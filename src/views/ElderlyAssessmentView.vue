@@ -59,6 +59,7 @@ const deleting = ref(false)
 const generatingReport = ref(false)
 const conversationState = ref('greeting')
 const currentInteraction = ref<ChatInteraction | null>(null)
+const interactionModalVisible = ref(false)
 const interactionValues = ref<Record<string, unknown>>({})
 const errorMessage = ref('')
 const copyIdButtonText = ref('复制我的号码')
@@ -140,7 +141,15 @@ const isChatInputMode = computed(
   () => !currentInteraction.value || currentInteraction.value.kind === 'chat'
 )
 const showInteractionModal = computed(
-  () => Boolean(currentInteraction.value && !isChatInputMode.value)
+  () => Boolean(currentInteraction.value && !isChatInputMode.value && interactionModalVisible.value && !generatingReport.value)
+)
+const interactionEntryLabel = computed(() =>
+  currentInteraction.value?.kind === 'confirm' ? '打开确认卡片' : '打开选择题卡片'
+)
+const interactionPendingText = computed(() =>
+  interactionModalVisible.value
+    ? '题卡当前已打开，也可以先取消并稍后继续。'
+    : '您已暂停当前题卡，可随时重新打开继续作答。'
 )
 const canConfirmReport = computed(
   () => currentInteraction.value?.kind === 'confirm' && !sending.value && !loading.value
@@ -586,6 +595,18 @@ function clearVoiceInput() {
   abortBrowserVoiceRecognition()
 }
 
+function openInteractionModal() {
+  if (!currentInteraction.value || isChatInputMode.value || generatingReport.value) {
+    return
+  }
+
+  interactionModalVisible.value = true
+}
+
+function dismissInteractionModal() {
+  interactionModalVisible.value = false
+}
+
 function getSessionLabel(item: SessionMetadata, index: number) {
   if (item.title?.trim()) {
     return item.title
@@ -960,7 +981,7 @@ async function handleSend() {
 
 async function submitStructuredInteraction(values: Record<string, unknown>) {
   if (!sessionId.value || !elderlyToken.value || sending.value || !currentInteraction.value) {
-    return
+    return false
   }
 
   const interaction = cloneJson(currentInteraction.value)
@@ -995,6 +1016,7 @@ async function submitStructuredInteraction(values: Record<string, unknown>) {
     )
     await revealAssistantMessage(assistantIndex, response.message)
     await finalizeInteractionResponse(response)
+    return true
   } catch (error) {
     if (!messages.value[assistantIndex]?.content) {
       messages.value.splice(assistantIndex, 1)
@@ -1007,6 +1029,7 @@ async function submitStructuredInteraction(values: Record<string, unknown>) {
         : error instanceof Error
           ? error.message
           : '提交失败，请稍后重试。'
+    return false
   } finally {
     sending.value = false
     generatingReport.value = false
@@ -1074,10 +1097,28 @@ async function handleCurrentInteractionSubmit() {
   }
 }
 
+async function handleConfirmReportGeneration() {
+  if (!currentInteraction.value || currentInteraction.value.kind !== 'confirm') {
+    return
+  }
+
+  dismissInteractionModal()
+  const submitted = await submitStructuredInteraction({ action: 'confirm' })
+  if (!submitted && currentInteraction.value?.kind === 'confirm') {
+    interactionModalVisible.value = true
+  }
+}
+
 async function handleConfirmChoice(action: 'confirm' | 'modify') {
   if (!currentInteraction.value || currentInteraction.value.kind !== 'confirm') {
     return
   }
+
+  if (action === 'confirm') {
+    await handleConfirmReportGeneration()
+    return
+  }
+
   await submitStructuredInteraction({ action })
 }
 
@@ -1085,7 +1126,7 @@ async function handleGenerateReport() {
   if (!canConfirmReport.value) {
     return
   }
-  await submitStructuredInteraction({ action: 'confirm' })
+  await handleConfirmReportGeneration()
 }
 
 async function handleDeleteSession() {
@@ -1216,6 +1257,30 @@ async function toggleVoiceInput() {
 }
 
 watch(
+  () => [currentInteraction.value?.id || '', currentInteraction.value?.kind || '', isChatInputMode.value] as const,
+  (nextValue, previousValue) => {
+    const [interactionId, interactionKind, chatInputMode] = nextValue
+    if (!interactionId || chatInputMode) {
+      interactionModalVisible.value = false
+      return
+    }
+
+    if (!previousValue) {
+      interactionModalVisible.value = true
+      return
+    }
+
+    const [previousId, previousKind] = previousValue
+    if (interactionId !== previousId || interactionKind !== previousKind) {
+      interactionModalVisible.value = true
+    }
+  },
+  {
+    immediate: true
+  }
+)
+
+watch(
   messages,
   async () => {
     await scrollChatToBottom()
@@ -1283,7 +1348,17 @@ onMounted(async () => {
 
         <footer class="chat-composer">
           <div class="composer-shell">
-            <template v-if="isChatInputMode">
+            <template v-if="generatingReport">
+              <div class="composer-shell__header">
+                <label class="composer-label">报告生成中</label>
+              </div>
+              <div class="composer-disabled">
+                <p class="composer-disabled__title">正在生成报告</p>
+                <p class="composer-disabled__text">聊天输入已临时禁用，请稍候查看系统返回结果。</p>
+              </div>
+            </template>
+
+            <template v-else-if="isChatInputMode">
               <div class="composer-shell__header">
                 <label class="composer-label" for="elderly-input">描述当前情况</label>
               </div>
@@ -1328,7 +1403,20 @@ onMounted(async () => {
               </div>
               <div class="interaction-pending">
                 <p class="interaction-pending__title">当前有待完成的题卡</p>
-                <p class="interaction-pending__text">请在屏幕中央完成选择后继续当前评估。</p>
+                <p class="interaction-pending__text">{{ interactionPendingText }}</p>
+                <div class="composer-actions composer-actions--card interaction-pending__actions">
+                  <button class="primary-button composer-submit" type="button" @click="openInteractionModal">
+                    {{ interactionEntryLabel }}
+                  </button>
+                  <button
+                    class="secondary-button composer-submit"
+                    type="button"
+                    :disabled="!interactionModalVisible"
+                    @click="dismissInteractionModal"
+                  >
+                    {{ interactionModalVisible ? '暂停答题' : '已暂停' }}
+                  </button>
+                </div>
               </div>
             </template>
           </div>
@@ -1426,7 +1514,7 @@ onMounted(async () => {
       </aside>
     </section>
 
-    <div v-if="showInteractionModal && currentInteraction" class="interaction-modal">
+    <div v-if="showInteractionModal && currentInteraction" class="interaction-modal" @click.self="dismissInteractionModal">
       <article
         class="surface-card interaction-modal__card"
         role="dialog"
@@ -1518,12 +1606,23 @@ onMounted(async () => {
               <button class="secondary-button composer-submit" type="button" :disabled="sending" @click="handleConfirmChoice('modify')">
                 修改信息
               </button>
+              <button class="ghost-button composer-submit" type="button" :disabled="sending || generatingReport" @click="dismissInteractionModal">
+                取消
+              </button>
             </div>
 
             <div
               v-if="currentInteraction.kind !== 'confirm'"
               class="composer-actions composer-actions--card"
             >
+              <button
+                class="secondary-button composer-submit"
+                type="button"
+                :disabled="sending"
+                @click="dismissInteractionModal"
+              >
+                取消
+              </button>
               <button
                 class="primary-button composer-submit"
                 type="button"
@@ -1871,6 +1970,29 @@ onMounted(async () => {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 249, 252, 0.96));
 }
 
+.composer-disabled {
+  padding: 18px 20px;
+  border-radius: 24px;
+  border: 1px solid rgba(83, 169, 183, 0.14);
+  background: linear-gradient(180deg, rgba(245, 249, 251, 0.96), rgba(236, 244, 246, 0.94));
+}
+
+.composer-disabled__title,
+.composer-disabled__text {
+  margin: 0;
+}
+
+.composer-disabled__title {
+  color: var(--ink-strong);
+  font-weight: 700;
+}
+
+.composer-disabled__text {
+  margin-top: 6px;
+  color: var(--ink-muted);
+  line-height: 1.7;
+}
+
 .interaction-card {
   display: grid;
   gap: 16px;
@@ -1897,6 +2019,10 @@ onMounted(async () => {
   margin-top: 6px;
   color: var(--ink-muted);
   line-height: 1.7;
+}
+
+.interaction-pending__actions {
+  margin-top: 16px;
 }
 
 .interaction-card__prompt {
