@@ -7,6 +7,7 @@ import EmptyStateCard from '@/components/EmptyStateCard.vue'
 import { useAuthSession } from '@/session'
 import type { DoctorElderlyDetail, DoctorElderlySummary } from '@/types'
 import { formatProfileValue, getIdentityTitle } from '@/utils/profile'
+import { getReportGeneratedAt, getReportRiskFactorPreview } from '@/utils/report'
 
 const router = useRouter()
 const { session } = useAuthSession()
@@ -95,7 +96,28 @@ const selectedSummaryItems = computed(() => {
   ]
 })
 const selectedRiskFactors = computed(() =>
-  (selectedOverview.value?.high_risk_reasons || []).filter((item) => item.trim())
+  {
+    const latestReport =
+      [...(selectedDetail.value?.reports || [])].sort((left, right) =>
+        getReportGeneratedAt(right).localeCompare(getReportGeneratedAt(left))
+      )[0] || null
+
+    const reportRiskFactors = getReportRiskFactorPreview(latestReport, 6)
+    if (reportRiskFactors.length > 0) {
+      return reportRiskFactors
+    }
+
+    return (selectedOverview.value?.high_risk_reasons || [])
+      .filter((item) => item.trim())
+      .map((item, index) => ({
+        id: `fallback-${index + 1}`,
+        timeframeLabel: '重点风险',
+        name: item,
+        description: '',
+        timeframe: '',
+        level: ''
+      }))
+  }
 )
 
 function formatDateTime(value: string) {
@@ -327,7 +349,14 @@ onMounted(async () => {
           <article class="overview-note overview-note--full">
             <p class="overview-note__label">风险因素</p>
             <ul v-if="selectedRiskFactors.length > 0" class="overview-note__list">
-              <li v-for="item in selectedRiskFactors" :key="item">{{ item }}</li>
+              <li v-for="item in selectedRiskFactors" :key="item.id">
+                <p class="overview-note__item-label">
+                  {{ item.timeframeLabel }}<span v-if="item.timeframe"> · {{ item.timeframe }}</span>
+                </p>
+                <p class="overview-note__item-content">
+                  {{ item.name }}<span v-if="item.description">：{{ item.description }}</span>
+                </p>
+              </li>
             </ul>
             <p v-else class="overview-note__content">暂无明确风险因素</p>
           </article>
@@ -514,11 +543,34 @@ onMounted(async () => {
 }
 
 .overview-note__list {
-  padding-left: 20px;
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 10px;
 }
 
-.overview-note__list li + li {
+.overview-note__list li {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(120, 164, 199, 0.14);
+}
+
+.overview-note__item-label,
+.overview-note__item-content {
+  margin: 0;
+  line-height: 1.8;
+}
+
+.overview-note__item-label {
+  color: var(--ink-muted);
+  font-weight: 400;
+}
+
+.overview-note__item-content {
   margin-top: 6px;
+  color: var(--ink-strong);
+  font-weight: 700;
 }
 
 .chip-list {
