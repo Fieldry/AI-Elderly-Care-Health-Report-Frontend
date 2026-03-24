@@ -230,7 +230,6 @@ onMounted(async () => {
           <div>
             <p class="eyebrow">医生端</p>
             <h1>老人总览</h1>
-            <p>左侧切换老人，右侧查看当前基础信息，再进入独立详情页处理管理和随访。</p>
           </div>
 
           <div class="record-list-card__actions">
@@ -294,7 +293,6 @@ onMounted(async () => {
           <header class="doctor-summary-card__header">
             <div>
               <p class="eyebrow">当前老人</p>
-              <h2>{{ selectedTitle }}</h2>
               <p class="doctor-summary-card__meta">
                 更新时间：{{ formatDateTime(selectedDetail.updated_at || selectedDetail.created_at) }}
               </p>
@@ -313,52 +311,18 @@ onMounted(async () => {
               <strong>{{ formatRiskLevel(selectedOverview?.current_risk_level) }}</strong>
             </article>
             <article class="overview-card">
-              <span>功能状态</span>
-              <strong>{{ selectedOverview?.functional_status_text || '暂无' }}</strong>
-            </article>
-            <article class="overview-card">
-              <span>报告数量</span>
-              <strong>{{ selectedDetail.reports.length }}</strong>
-            </article>
-            <article class="overview-card">
               <span>管理状态</span>
               <strong>{{ formatManagementStatus(selectedDetail.management.management_status) }}</strong>
             </article>
           </div>
 
-          <div class="summary-grid">
-            <article v-for="item in selectedSummaryItems" :key="item.label" class="summary-item">
-              <span>{{ item.label }}</span>
-              <strong>{{ item.value }}</strong>
-            </article>
-          </div>
-
           <article class="overview-note">
-            <strong>医生派生摘要</strong>
-            <p>{{ selectedOverview?.summary || selectedOverview?.recent_change || '暂无医生侧摘要。' }}</p>
+            <strong>功能状态</strong>
+            <p>{{ selectedOverview?.functional_status_text || '暂无' }}</p>
           </article>
 
-          <div v-if="(selectedOverview?.risk_tags || []).length > 0" class="chip-list">
-            <span v-for="tag in selectedOverview?.risk_tags" :key="tag" class="chip">{{ tag }}</span>
-          </div>
 
-          <div class="overview-columns">
-            <section>
-              <h3>主要问题</h3>
-              <ul v-if="(selectedOverview?.main_problems || []).length > 0" class="plain-list">
-                <li v-for="item in selectedOverview?.main_problems.slice(0, 4)" :key="item">{{ item }}</li>
-              </ul>
-              <p v-else class="muted-text">暂无主要问题摘要。</p>
-            </section>
 
-            <section>
-              <h3>建议动作</h3>
-              <ul v-if="(selectedOverview?.recommended_actions || []).length > 0" class="plain-list">
-                <li v-for="item in selectedOverview?.recommended_actions.slice(0, 4)" :key="item">{{ item }}</li>
-              </ul>
-              <p v-else class="muted-text">暂无建议动作。</p>
-            </section>
-          </div>
         </article>
 
         <EmptyStateCard

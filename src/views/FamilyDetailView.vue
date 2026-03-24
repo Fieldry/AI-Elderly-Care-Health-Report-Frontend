@@ -61,7 +61,7 @@ const reportCards = computed(() =>
     reportId: getReportId(report),
     reportTitle: getSequentialReportName(index + 1),
     generatedAt: getReportGeneratedAt(report),
-    recommendations: getReportRecommendationPreview(report, 4)
+    recommendations: getReportRecommendationPreview(report, 3)
   }))
 )
 const activeReport = computed(() => {
@@ -340,8 +340,7 @@ onMounted(async () => {
 
               <section class="report-item__suggestions">
                 <div class="report-item__suggestions-header">
-                  <h4>建议部分</h4>
-                  <span>{{ reportCard.recommendations.length > 0 ? `展示 ${reportCard.recommendations.length} 条` : '暂无建议' }}</span>
+                  <h4>行动建议</h4>
                 </div>
 
                 <ul v-if="reportCard.recommendations.length > 0" class="report-item__suggestion-list">
