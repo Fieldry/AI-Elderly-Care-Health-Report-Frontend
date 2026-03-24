@@ -15,7 +15,7 @@ import {
   streamChatMessage
 } from '@/api/chat'
 import { getElderlyProfile, getElderlyReportDetail } from '@/api/elderly'
-import { exportReportPdf, generateReport, streamGenerateReport } from '@/api/report'
+import { exportReportPdf } from '@/api/report'
 import ProfileOverview from '@/components/ProfileOverview.vue'
 import { useGoogleStreamingSpeech } from '@/composables/useGoogleStreamingSpeech'
 import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
@@ -30,6 +30,8 @@ import {
   useAuthSession
 } from '@/session'
 import type {
+  ChatInteraction,
+  ChatInteractionField,
   ChatMessage,
   ChatMessageResponse,
   ChatStartResponse,
@@ -56,9 +58,10 @@ const sending = ref(false)
 const deleting = ref(false)
 const generatingReport = ref(false)
 const conversationState = ref('greeting')
+const currentInteraction = ref<ChatInteraction | null>(null)
+const interactionValues = ref<Record<string, unknown>>({})
 const errorMessage = ref('')
 const copyIdButtonText = ref('复制我的号码')
-const reportGenerationText = ref('')
 const completionPercent = ref<number | null>(null)
 const selectedReportId = ref('')
 const selectedReportDetail = ref<Record<string, unknown> | null>(null)
@@ -133,6 +136,25 @@ const progressPercentLabel = computed(() =>
 const sessionStatusText = computed(() => {
   return getConversationStateText(conversationState.value)
 })
+const isChatInputMode = computed(
+  () => !currentInteraction.value || currentInteraction.value.kind === 'chat'
+)
+const canConfirmReport = computed(
+  () => currentInteraction.value?.kind === 'confirm' && !sending.value && !loading.value
+)
+const interactionFields = computed(() =>
+  Array.isArray(currentInteraction.value?.fields)
+    ? (currentInteraction.value?.fields?.filter((field): field is ChatInteractionField =>
+        typeof field === 'object' && !!field && 'key' in field && 'label' in field
+      ) || [])
+    : []
+)
+const interactionItems = computed(() =>
+  Array.isArray(currentInteraction.value?.items) ? currentInteraction.value.items : []
+)
+const interactionOptions = computed(() =>
+  Array.isArray(currentInteraction.value?.options) ? currentInteraction.value.options : []
+)
 
 function getConversationStateText(value: string | undefined) {
   const map: Record<string, string> = {
@@ -210,6 +232,119 @@ const voiceHintText = computed(() => {
 
 function cloneJson<T>(value: T) {
   return JSON.parse(JSON.stringify(value)) as T
+}
+
+function resetInteractionValues(interaction: ChatInteraction | null) {
+  if (!interaction) {
+    interactionValues.value = {}
+    return
+  }
+
+  if (interaction.kind === 'multi_select') {
+    interactionValues.value = {
+      selected: []
+    }
+    return
+  }
+
+  if (interaction.kind === 'confirm') {
+    interactionValues.value = {
+      action: ''
+    }
+    return
+  }
+
+  const nextValues: Record<string, unknown> = {}
+
+  if (interaction.kind === 'matrix_single_choice') {
+    for (const item of interaction.items || []) {
+      nextValues[item.key] = ''
+    }
+  }
+
+  if (interaction.kind === 'form_card') {
+    for (const field of interactionFields.value) {
+      nextValues[field.key] = ''
+      if (field.custom_key) {
+        nextValues[field.custom_key] = ''
+      }
+    }
+  }
+
+  if (interaction.kind === 'single_choice' && interaction.field) {
+    nextValues[interaction.field] = ''
+  }
+
+  interactionValues.value = nextValues
+}
+
+function getInteractionFieldValue(key: string) {
+  const value = interactionValues.value[key]
+  return typeof value === 'string' ? value : ''
+}
+
+function setInteractionFieldValue(key: string, value: string) {
+  interactionValues.value = {
+    ...interactionValues.value,
+    [key]: value
+  }
+}
+
+function toggleInteractionMultiSelect(key: string) {
+  const selected = Array.isArray(interactionValues.value.selected)
+    ? [...(interactionValues.value.selected as string[])]
+    : []
+
+  const nextSelected = selected.includes(key)
+    ? selected.filter((item) => item !== key)
+    : [...selected, key]
+
+  interactionValues.value = {
+    ...interactionValues.value,
+    selected: nextSelected
+  }
+}
+
+function describeInteractionAnswer(interaction: ChatInteraction, values: Record<string, unknown>): string {
+  if (interaction.kind === 'single_choice' && interaction.field) {
+    const answer = getStringValue(values[interaction.field])
+    return answer || '已提交选项'
+  }
+
+  if (interaction.kind === 'matrix_single_choice') {
+    return (interaction.items || [])
+      .map((item) => `${item.label}：${getStringValue(values[item.key])}`)
+      .filter((item) => item.replace(/：$/, '') !== '')
+      .join('；')
+  }
+
+  if (interaction.kind === 'multi_select') {
+    const selected = new Set(Array.isArray(values.selected) ? values.selected.map((item) => String(item)) : [])
+    const labels = (interaction.items || [])
+      .filter((item) => selected.has(item.key))
+      .map((item) => item.label)
+    return labels.length > 0 ? `已选择：${labels.join('、')}` : '已选择：无'
+  }
+
+  if (interaction.kind === 'form_card') {
+    return interactionFields.value
+      .map((field) => {
+        const value = getStringValue(values[field.key])
+        return value ? `${field.label}：${value}` : ''
+      })
+      .filter(Boolean)
+      .join('；')
+  }
+
+  if (interaction.kind === 'confirm') {
+    return values.action === 'confirm' ? '确认生成报告' : '需要修改信息'
+  }
+
+  return '已提交答案'
+}
+
+function getStringValue(value: unknown): string {
+  return typeof value === 'string' ? value : ''
 }
 
 function extractReportPoints(markdown: string) {
@@ -356,8 +491,18 @@ function persistCurrentSnapshot(metadata = resolveSnapshotMetadata()) {
     profile: Object.keys(profile.value || {}).length > 0 ? cloneJson(profile.value) : undefined,
     reports: cloneJson(reports.value),
     conversationState: conversationState.value,
-    completionPercent: completionPercent.value
+    completionPercent: completionPercent.value,
+    currentInteraction: currentInteraction.value ? cloneJson(currentInteraction.value) : null
   })
+}
+
+function setCurrentInteraction(nextInteraction: ChatInteraction | null | undefined) {
+  const previousId = currentInteraction.value?.id || ''
+  const nextId = nextInteraction?.id || ''
+  currentInteraction.value = nextInteraction ? cloneJson(nextInteraction) : null
+  if (previousId !== nextId) {
+    resetInteractionValues(currentInteraction.value)
+  }
 }
 
 function applyStoredSessionSnapshot(targetSessionId: string, message: string) {
@@ -372,6 +517,7 @@ function applyStoredSessionSnapshot(targetSessionId: string, message: string) {
   reports.value = cloneJson(snapshot.reports || [])
   conversationState.value = snapshot.conversationState || 'collecting'
   completionPercent.value = normalizeProgressPercent(snapshot.completionPercent)
+  setCurrentInteraction(snapshot.currentInteraction || null)
   upsertSessionMetadata(snapshot.metadata)
 
   if (selectedReportId.value && !reports.value.some((item) => getReportId(item) === selectedReportId.value)) {
@@ -553,6 +699,7 @@ async function refreshProgressState(targetSessionId: string, token: string) {
   const progress = await getChatProgress(targetSessionId, token)
   conversationState.value = progress.state || 'collecting'
   completionPercent.value = normalizeProgressPercent(progress.progress)
+  setCurrentInteraction(progress.interaction || null)
 }
 
 async function refreshSessionArtifacts(targetSessionId: string, token: string) {
@@ -668,7 +815,8 @@ async function createNewSession() {
     completionPercent.value = null
     profile.value = {}
     reports.value = []
-    conversationState.value = 'greeting'
+    conversationState.value = 'collecting'
+    setCurrentInteraction(response.interaction || null)
     persistCurrentSnapshot(createSessionMetadata(response.sessionId, response.userId))
 
     await Promise.allSettled([
@@ -724,8 +872,27 @@ async function initializeAssessment() {
   }
 }
 
+async function finalizeInteractionResponse(response: ChatMessageResponse) {
+  conversationState.value = response.state || 'collecting'
+  completionPercent.value = normalizeProgressPercent(response.progress)
+  setCurrentInteraction(response.interaction || null)
+
+  const refreshTasks: Array<Promise<unknown>> = [
+    refreshProgressState(sessionId.value, elderlyToken.value).catch(() => {}),
+    refreshSessionArtifacts(sessionId.value, elderlyToken.value),
+    refreshSessions(elderlyToken.value)
+  ]
+
+  if (response.completed) {
+    refreshTasks.push(refreshCurrentSessionReports(sessionId.value, elderlyToken.value))
+  }
+
+  await Promise.allSettled(refreshTasks)
+  persistCurrentSnapshot()
+}
+
 async function handleSend() {
-  if (!sessionId.value || sending.value || !inputText.value.trim() || !elderlyToken.value) {
+  if (!sessionId.value || sending.value || !inputText.value.trim() || !elderlyToken.value || !isChatInputMode.value) {
     return
   }
 
@@ -770,15 +937,7 @@ async function handleSend() {
       await revealAssistantMessage(assistantIndex, response.message)
     }
 
-    conversationState.value = response.state || 'collecting'
-    completionPercent.value = normalizeProgressPercent(response.progress)
-
-    await Promise.allSettled([
-      refreshProgressState(sessionId.value, elderlyToken.value).catch(() => {}),
-      refreshSessionArtifacts(sessionId.value, elderlyToken.value),
-      refreshSessions(elderlyToken.value)
-    ])
-    persistCurrentSnapshot()
+    await finalizeInteractionResponse(response)
   } catch (error) {
     if (!messages.value[assistantIndex]?.content) {
       messages.value.splice(assistantIndex, 1)
@@ -796,53 +955,134 @@ async function handleSend() {
   }
 }
 
-async function handleGenerateReport() {
-  if (!sessionId.value || !elderlyToken.value || generatingReport.value) {
+async function submitStructuredInteraction(values: Record<string, unknown>) {
+  if (!sessionId.value || !elderlyToken.value || sending.value || !currentInteraction.value) {
     return
   }
 
-  generatingReport.value = true
+  const interaction = cloneJson(currentInteraction.value)
+  const userDisplayText = describeInteractionAnswer(interaction, values)
+  sending.value = true
+  generatingReport.value = interaction.kind === 'confirm'
   errorMessage.value = ''
-  reportGenerationText.value = ''
-  conversationState.value = 'generating'
+  clearVoiceInput()
+
+  messages.value.push({
+    role: 'user',
+    content: userDisplayText
+  })
+  messages.value.push({
+    role: 'assistant',
+    content: ''
+  })
+
+  const assistantIndex = messages.value.length - 1
+  await scrollChatToBottom()
 
   try {
-    let reportId = ''
-
-    try {
-      const response = await streamGenerateReport(sessionId.value, profile.value, elderlyToken.value, (chunk) => {
-        reportGenerationText.value += chunk
-      })
-
-      reportId = response.reportId || getReportId(response.report || null)
-      if (!reportGenerationText.value && response.report) {
-        reportGenerationText.value = JSON.stringify(response.report, null, 2)
+    const response = await sendChatMessage(
+      sessionId.value,
+      '',
+      elderlyToken.value,
+      undefined,
+      {
+        interactionId: interaction.id,
+        values
       }
-    } catch {
-      const response = await generateReport(sessionId.value, profile.value, elderlyToken.value)
-      reportId = response.reportId || ''
-      if (!reportGenerationText.value && response.report) {
-        reportGenerationText.value = JSON.stringify(response.report, null, 2)
-      }
-    }
-
-    await Promise.allSettled([
-      refreshCurrentSessionReports(sessionId.value, elderlyToken.value),
-      refreshSessionArtifacts(sessionId.value, elderlyToken.value),
-      refreshSessions(elderlyToken.value),
-      refreshProgressState(sessionId.value, elderlyToken.value).catch(() => {})
-    ])
-    persistCurrentSnapshot()
-
-    if (reportId) {
-      await openReportDetail(reportId)
-    }
+    )
+    await revealAssistantMessage(assistantIndex, response.message)
+    await finalizeInteractionResponse(response)
   } catch (error) {
+    if (!messages.value[assistantIndex]?.content) {
+      messages.value.splice(assistantIndex, 1)
+    }
+
+    persistCurrentSnapshot()
     errorMessage.value =
-      error instanceof Error ? error.message : '生成报告失败，请稍后重试。'
+      isForbidden(error)
+        ? '当前会话暂时无法继续同步，请稍后重试或先查看已保存内容。'
+        : error instanceof Error
+          ? error.message
+          : '提交失败，请稍后重试。'
   } finally {
+    sending.value = false
     generatingReport.value = false
   }
+}
+
+function isInteractionValueSelected(key: string, value: string) {
+  return getInteractionFieldValue(key) === value
+}
+
+async function handleCurrentInteractionSubmit() {
+  if (!currentInteraction.value) {
+    return
+  }
+
+  errorMessage.value = ''
+  const interaction = currentInteraction.value
+
+  if (interaction.kind === 'single_choice' && interaction.field) {
+    const value = getInteractionFieldValue(interaction.field)
+    if (!value) {
+      errorMessage.value = '请先选择一个答案。'
+      return
+    }
+    await submitStructuredInteraction({ [interaction.field]: value })
+    return
+  }
+
+  if (interaction.kind === 'matrix_single_choice') {
+    const values: Record<string, unknown> = {}
+    for (const item of interactionItems.value) {
+      const value = getInteractionFieldValue(item.key)
+      if (!value) {
+        errorMessage.value = `请先完成“${item.label}”这一项。`
+        return
+      }
+      values[item.key] = value
+    }
+    await submitStructuredInteraction(values)
+    return
+  }
+
+  if (interaction.kind === 'multi_select') {
+    const selected = Array.isArray(interactionValues.value.selected)
+      ? interactionValues.value.selected.map((item) => String(item))
+      : []
+    await submitStructuredInteraction({ selected })
+    return
+  }
+
+  if (interaction.kind === 'form_card') {
+    const values: Record<string, unknown> = {}
+    for (const field of interactionFields.value) {
+      const fieldValue = getInteractionFieldValue(field.key)
+      if (!fieldValue) {
+        errorMessage.value = `请先填写“${field.label}”。`
+        return
+      }
+      values[field.key] = fieldValue
+      if (field.custom_key) {
+        values[field.custom_key] = getInteractionFieldValue(field.custom_key)
+      }
+    }
+    await submitStructuredInteraction(values)
+  }
+}
+
+async function handleConfirmChoice(action: 'confirm' | 'modify') {
+  if (!currentInteraction.value || currentInteraction.value.kind !== 'confirm') {
+    return
+  }
+  await submitStructuredInteraction({ action })
+}
+
+async function handleGenerateReport() {
+  if (!canConfirmReport.value) {
+    return
+  }
+  await submitStructuredInteraction({ action: 'confirm' })
 }
 
 async function handleDeleteSession() {
@@ -948,7 +1188,7 @@ async function handleOpenSessionReport(item: SessionMetadata) {
 }
 
 async function toggleVoiceInput() {
-  if (!sessionId.value) {
+  if (!sessionId.value || !isChatInputMode.value) {
     return
   }
 
@@ -994,7 +1234,7 @@ onMounted(async () => {
         <header class="chat-card__header">
           <div class="chat-card__intro">
             <h2>对话采集</h2>
-            <p class="chat-card__lead">请像平常聊天一样，描述您的身体情况、生活能力和日常习惯。</p>
+            <p class="chat-card__lead">系统会把自由对话和几张选择题卡结合起来，尽量让填写过程更轻松。</p>
           </div>
           <div class="chat-card__header-actions">
             <p>这是您的号码，可复制给您的家属绑定</p>
@@ -1040,42 +1280,143 @@ onMounted(async () => {
 
         <footer class="chat-composer">
           <div class="composer-shell">
-            <div class="composer-shell__header">
-              <label class="composer-label" for="elderly-input">描述当前情况</label>
-            </div>
-            <textarea
-              id="elderly-input"
-              v-model="inputText"
-              class="composer-textarea"
-              :disabled="loading || sending"
-              placeholder="例如：我今年 82 岁，最近走路容易喘，晚上睡眠一般，洗澡时需要家人帮忙。"
-              rows="1"
-              @keydown.enter.exact.prevent="handleSend"
-            />
-            <div class="composer-actions">
-              <div class="voice-panel">
+            <template v-if="isChatInputMode">
+              <div class="composer-shell__header">
+                <label class="composer-label" for="elderly-input">描述当前情况</label>
+              </div>
+              <textarea
+                id="elderly-input"
+                v-model="inputText"
+                class="composer-textarea"
+                :disabled="loading || sending"
+                placeholder="例如：我今年 82 岁，最近走路容易喘，晚上睡眠一般，洗澡时需要家人帮忙。"
+                rows="1"
+                @keydown.enter.exact.prevent="handleSend"
+              />
+              <div class="composer-actions">
+                <div class="voice-panel">
+                  <button
+                    class="secondary-button voice-button"
+                    type="button"
+                    :disabled="loading || !isVoiceAvailable"
+                    @click="toggleVoiceInput"
+                  >
+                    <span class="voice-button__dot" :class="{ 'is-live': isVoiceActive }" />
+                    {{ voiceButtonLabel }}
+                  </button>
+                  <div class="voice-panel__copy">
+                    <strong>{{ isVoiceActive ? '正在聆听' : '语音输入' }}</strong>
+                  </div>
+                </div>
                 <button
-                  class="secondary-button voice-button"
+                  class="primary-button composer-submit"
                   type="button"
-                  :disabled="loading || !isVoiceAvailable"
-                  @click="toggleVoiceInput"
+                  :disabled="loading || sending"
+                  @click="handleSend"
                 >
-                  <span class="voice-button__dot" :class="{ 'is-live': isVoiceActive }" />
-                  {{ voiceButtonLabel }}
+                  {{ sending ? '发送中...' : '发送' }}
                 </button>
-                <div class="voice-panel__copy">
-                  <strong>{{ isVoiceActive ? '正在聆听' : '语音输入' }}</strong>
+              </div>
+            </template>
+
+            <template v-else-if="currentInteraction">
+              <div class="composer-shell__header">
+                <span class="composer-label">{{ currentInteraction.groupName }}</span>
+              </div>
+              <div class="interaction-card">
+                <p class="interaction-card__prompt">{{ currentInteraction.prompt }}</p>
+
+                <div v-if="currentInteraction.kind === 'single_choice' && currentInteraction.field" class="choice-grid">
+                  <button
+                    v-for="option in interactionOptions"
+                    :key="option.value"
+                    class="choice-chip"
+                    :class="{ 'is-selected': isInteractionValueSelected(currentInteraction.field, option.value) }"
+                    type="button"
+                    @click="setInteractionFieldValue(currentInteraction.field, option.value)"
+                  >
+                    {{ option.label }}
+                  </button>
+                </div>
+
+                <div v-else-if="currentInteraction.kind === 'matrix_single_choice'" class="matrix-card">
+                  <div v-for="item in interactionItems" :key="item.key" class="matrix-row">
+                    <p class="matrix-row__label">{{ item.label }}</p>
+                    <div class="choice-grid choice-grid--compact">
+                      <button
+                        v-for="option in interactionOptions"
+                        :key="`${item.key}-${option.value}`"
+                        class="choice-chip choice-chip--small"
+                        :class="{ 'is-selected': isInteractionValueSelected(item.key, option.value) }"
+                        type="button"
+                        @click="setInteractionFieldValue(item.key, option.value)"
+                      >
+                        {{ option.label }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-else-if="currentInteraction.kind === 'multi_select'" class="multi-card">
+                  <button
+                    v-for="item in interactionItems"
+                    :key="item.key"
+                    class="choice-chip choice-chip--check"
+                    :class="{ 'is-selected': Array.isArray(interactionValues.selected) && interactionValues.selected.includes(item.key) }"
+                    type="button"
+                    @click="toggleInteractionMultiSelect(item.key)"
+                  >
+                    {{ item.label }}
+                  </button>
+                </div>
+
+                <div v-else-if="currentInteraction.kind === 'form_card'" class="form-card">
+                  <label v-for="field in interactionFields" :key="field.key" class="form-card__field">
+                    <span>{{ field.label }}</span>
+                    <select
+                      class="composer-select"
+                      :value="getInteractionFieldValue(field.key)"
+                      @change="setInteractionFieldValue(field.key, String(($event.target as HTMLSelectElement).value || ''))"
+                    >
+                      <option value="">请选择</option>
+                      <option v-for="option in field.options || []" :key="option.value" :value="option.value">
+                        {{ option.label }}
+                      </option>
+                    </select>
+                    <input
+                      v-if="field.custom_key && getInteractionFieldValue(field.key) === '其他'"
+                      class="composer-input"
+                      :value="getInteractionFieldValue(field.custom_key)"
+                      :placeholder="field.placeholder || '请补充说明'"
+                      @input="setInteractionFieldValue(field.custom_key, String(($event.target as HTMLInputElement).value || ''))"
+                    />
+                  </label>
+                </div>
+
+                <div v-else-if="currentInteraction.kind === 'confirm'" class="confirm-card">
+                  <button class="primary-button composer-submit" type="button" :disabled="sending" @click="handleConfirmChoice('confirm')">
+                    {{ sending || generatingReport ? '生成中...' : '确认生成报告' }}
+                  </button>
+                  <button class="secondary-button composer-submit" type="button" :disabled="sending" @click="handleConfirmChoice('modify')">
+                    修改信息
+                  </button>
+                </div>
+
+                <div
+                  v-if="currentInteraction.kind !== 'confirm'"
+                  class="composer-actions composer-actions--card"
+                >
+                  <button
+                    class="primary-button composer-submit"
+                    type="button"
+                    :disabled="loading || sending"
+                    @click="handleCurrentInteractionSubmit"
+                  >
+                    {{ sending ? '提交中...' : (currentInteraction.submitLabel || '提交答案') }}
+                  </button>
                 </div>
               </div>
-              <button
-                class="primary-button composer-submit"
-                type="button"
-                :disabled="loading || sending"
-                @click="handleSend"
-              >
-                {{ sending ? '发送中...' : '发送' }}
-              </button>
-            </div>
+            </template>
           </div>
         </footer>
       </article>
@@ -1103,10 +1444,10 @@ onMounted(async () => {
             <button
               class="primary-button summary-card__action"
               type="button"
-              :disabled="!sessionId || generatingReport"
+              :disabled="!canConfirmReport"
               @click="handleGenerateReport"
             >
-              {{ generatingReport ? '生成中...' : '生成报告' }}
+              {{ generatingReport ? '生成中...' : '确认并生成报告' }}
             </button>
             <button
               class="ghost-button summary-card__action"
@@ -1168,12 +1509,6 @@ onMounted(async () => {
 
         <ProfileOverview :profile="profile" />
 
-        <section v-if="generatingReport && reportGenerationText" class="surface-card stream-card">
-          <div class="panel-header">
-            <h3>流式生成中</h3>
-          </div>
-          <pre class="stream-card__content">{{ reportGenerationText }}</pre>
-        </section>
       </aside>
     </section>
 
@@ -1510,6 +1845,97 @@ onMounted(async () => {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 249, 252, 0.96));
 }
 
+.interaction-card {
+  display: grid;
+  gap: 16px;
+}
+
+.interaction-card__prompt {
+  margin: 0;
+  color: var(--ink-strong);
+  line-height: 1.7;
+}
+
+.choice-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.choice-grid--compact {
+  gap: 8px;
+}
+
+.choice-chip {
+  border: 1px solid rgba(83, 169, 183, 0.18);
+  background: rgba(248, 252, 255, 0.94);
+  color: var(--ink-strong);
+  border-radius: 999px;
+  min-height: 2.75rem;
+  padding: 0.6rem 1rem;
+  text-align: left;
+  transition: all 120ms ease;
+}
+
+.choice-chip--small {
+  min-height: 2.35rem;
+  padding: 0.45rem 0.85rem;
+}
+
+.choice-chip--check {
+  border-radius: 18px;
+}
+
+.choice-chip.is-selected {
+  border-color: rgba(43, 134, 150, 0.36);
+  background: rgba(83, 169, 183, 0.16);
+  color: var(--brand-strong);
+  box-shadow: inset 0 0 0 1px rgba(43, 134, 150, 0.08);
+}
+
+.matrix-card,
+.form-card {
+  display: grid;
+  gap: 14px;
+}
+
+.matrix-row {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 20px;
+  background: rgba(246, 251, 253, 0.92);
+  border: 1px solid rgba(83, 169, 183, 0.1);
+}
+
+.matrix-row__label {
+  margin: 0;
+  color: var(--ink-strong);
+  font-weight: 700;
+}
+
+.form-card__field {
+  display: grid;
+  gap: 8px;
+  color: var(--ink-strong);
+}
+
+.composer-select,
+.composer-input {
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid rgba(83, 169, 183, 0.16);
+  background: rgba(255, 255, 255, 0.96);
+  padding: 0.85rem 0.95rem;
+  color: var(--ink-strong);
+}
+
+.confirm-card {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .composer-actions {
   margin-top: 14px;
   display: flex;
@@ -1517,6 +1943,10 @@ onMounted(async () => {
   gap: 14px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.composer-actions--card {
+  justify-content: flex-end;
 }
 
 .voice-panel {

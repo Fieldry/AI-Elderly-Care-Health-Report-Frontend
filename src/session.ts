@@ -2,6 +2,7 @@ import { computed, reactive } from 'vue'
 
 import type {
   AuthSession,
+  ChatInteraction,
   ChatMessage,
   ElderlyAuthSession,
   FamilyAuthSession,
@@ -24,6 +25,7 @@ interface ElderlySessionSnapshot {
   reports?: Array<Record<string, unknown>>
   conversationState?: string
   completionPercent?: number | null
+  currentInteraction?: ChatInteraction | null
 }
 
 interface FamilyConversationSnapshot {
@@ -233,7 +235,8 @@ function normalizeElderlySessionSnapshot(raw: unknown): ElderlySessionSnapshot |
         ? record.completionPercent
         : record.completionPercent === null
           ? null
-          : undefined
+          : undefined,
+    currentInteraction: normalizeRecord(record.currentInteraction) as ChatInteraction | null | undefined
   }
 }
 

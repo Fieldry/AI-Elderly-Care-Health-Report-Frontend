@@ -1,5 +1,9 @@
 import { asArray, asRecord, buildAuthHeaders, buildJsonHeaders, consumeSse, getNumber, getString, requestJson } from '@/api/core'
 import type {
+  ChatInteraction,
+  ChatInteractionField,
+  ChatInteractionItem,
+  ChatOption,
   ChatMessage,
   ChatMessageResponse,
   ChatProgressResponse,
@@ -14,6 +18,87 @@ interface StreamAccumulator {
   progress: number
   completed: boolean
   chunkCount: number
+  interaction: ChatInteraction | null
+}
+
+function normalizeChatOption(value: unknown): ChatOption | null {
+  const record = asRecord(value)
+  const label = getString(record, 'label')
+  const optionValue = getString(record, 'value')
+  if (!label || !optionValue) {
+    return null
+  }
+  return {
+    label,
+    value: optionValue
+  }
+}
+
+function normalizeChatInteractionField(value: unknown): ChatInteractionField | null {
+  const record = asRecord(value)
+  if (!record) {
+    return null
+  }
+  const key = getString(record, 'key')
+  const label = getString(record, 'label')
+  if (!key || !label) {
+    return null
+  }
+  return {
+    key,
+    label,
+    type: getString(record, 'type') || undefined,
+    options: asArray(record.options).map(normalizeChatOption).filter(Boolean) as ChatOption[],
+    allow_custom: Boolean(record.allow_custom ?? record.allowCustom),
+    custom_key: getString(record, 'custom_key', 'customKey') || undefined,
+    placeholder: getString(record, 'placeholder') || undefined
+  }
+}
+
+function normalizeChatInteractionItem(value: unknown): ChatInteractionItem | null {
+  const record = asRecord(value)
+  if (!record) {
+    return null
+  }
+  const key = getString(record, 'key')
+  const label = getString(record, 'label')
+  if (!key || !label) {
+    return null
+  }
+  return { key, label }
+}
+
+function normalizeChatInteraction(value: unknown): ChatInteraction | null {
+  const record = asRecord(value)
+  if (!record) {
+    return null
+  }
+  const id = getString(record, 'id')
+  const groupId = getString(record, 'groupId', 'group_id')
+  const groupName = getString(record, 'groupName', 'group_name')
+  const kind = getString(record, 'kind')
+  const prompt = getString(record, 'prompt')
+  if (!id || !groupId || !groupName || !kind || !prompt) {
+    return null
+  }
+
+  const normalizedFields = asArray(record.fields)
+    .map((item) => normalizeChatInteractionField(item) || (typeof item === 'string' ? item : null))
+    .filter(Boolean) as Array<ChatInteractionField | string>
+
+  return {
+    id,
+    groupId,
+    groupName,
+    kind,
+    prompt,
+    allowFreeText: Boolean(record.allowFreeText ?? record.allow_free_text),
+    submitLabel: getString(record, 'submitLabel', 'submit_label') || undefined,
+    field: getString(record, 'field') || undefined,
+    options: asArray(record.options).map(normalizeChatOption).filter(Boolean) as ChatOption[],
+    items: asArray(record.items).map(normalizeChatInteractionItem).filter(Boolean) as ChatInteractionItem[],
+    fields: normalizedFields
+  }
 }
 
 function normalizeSessionMetadata(value: unknown): SessionMetadata | null {
@@ -166,20 +251,41 @@ function applyStreamPayload(accumulator: StreamAccumulator, payload: unknown, ra
     if (typeof nestedRecord.completed === 'boolean') {
       accumulator.completed = nestedRecord.completed
     }
+
+    const nestedInteraction = normalizeChatInteraction(nestedRecord.interaction)
+    if (nestedInteraction || nestedRecord.interaction === null) {
+      accumulator.interaction = nestedInteraction
+    }
+  }
+
+  const interaction = normalizeChatInteraction(record.interaction)
+  if (interaction || record.interaction === null) {
+    accumulator.interaction = interaction
   }
 }
 
-export function startChat() {
-  return requestJson<ChatStartResponse>('/chat/start', {
+export async function startChat() {
+  const response = await requestJson<unknown>('/chat/start', {
     method: 'POST'
   })
+  const record = asRecord(response) || {}
+  return {
+    userId: getString(record, 'userId', 'user_id') || '',
+    sessionId: getString(record, 'sessionId', 'session_id') || '',
+    welcomeMessage: getString(record, 'welcomeMessage', 'welcome_message') || '',
+    interaction: normalizeChatInteraction(record.interaction),
+    accessToken: getString(record, 'accessToken', 'access_token') || '',
+    userType: getString(record, 'userType', 'user_type') || undefined,
+    expiresAt: getString(record, 'expiresAt', 'expires_at') || undefined
+  } satisfies ChatStartResponse
 }
 
 export function sendChatMessage(
   sessionId: string,
   message: string,
   token: string,
-  context?: Record<string, unknown>
+  context?: Record<string, unknown>,
+  answer?: Record<string, unknown>
 ) {
   return requestJson<ChatMessageResponse>('/chat/message', {
     method: 'POST',
@@ -187,8 +293,18 @@ export function sendChatMessage(
     body: JSON.stringify({
       sessionId,
       message,
-      context
+      context,
+      answer
     })
+  }).then((response) => {
+    const record = asRecord(response) || {}
+    return {
+      message: getString(record, 'message') || '',
+      state: getString(record, 'state') || 'collecting',
+      progress: getNumber(record, 'progress') ?? 0,
+      completed: Boolean(record.completed),
+      interaction: normalizeChatInteraction(record.interaction)
+    } satisfies ChatMessageResponse
   })
 }
 
@@ -203,7 +319,8 @@ export async function streamChatMessage(
     state: 'collecting',
     progress: 0,
     completed: false,
-    chunkCount: 0
+    chunkCount: 0,
+    interaction: null
   }
 
   await consumeSse(
@@ -233,7 +350,8 @@ export async function streamChatMessage(
     message: accumulator.message.trim(),
     state: accumulator.state,
     progress: accumulator.progress,
-    completed: accumulator.completed
+    completed: accumulator.completed,
+    interaction: accumulator.interaction
   } satisfies ChatMessageResponse
 }
 
@@ -274,7 +392,8 @@ export async function getChatProgress(sessionId: string, token: string) {
     pendingGroups: asArray<string>(record.pendingGroups ?? record.pending_groups).filter(
       (item) => typeof item === 'string'
     ),
-    missingFields
+    missingFields,
+    interaction: normalizeChatInteraction(record.interaction)
   } satisfies ChatProgressResponse
 }
 

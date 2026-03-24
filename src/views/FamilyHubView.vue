@@ -61,12 +61,12 @@ const selectedSummaryItems = computed(() => {
       value: formatProfileValue(profile.sex)
     },
     {
-      label: '所在省份',
-      value: formatProfileValue(profile.province)
-    },
-    {
       label: '居住地类型',
       value: formatProfileValue(profile.residence)
+    },
+    {
+      label: '受教育年限',
+      value: formatProfileValue(profile.education_years)
     },
     {
       label: '居住安排',
@@ -79,6 +79,10 @@ const selectedSummaryItems = computed(() => {
     {
       label: '健康限制',
       value: formatProfileValue(profile.health_limitation)
+    },
+    {
+      label: '医保情况',
+      value: formatProfileValue(profile.medical_insurance)
     }
   ]
 })

@@ -53,9 +53,44 @@ export interface ChatStartResponse {
   userId: string
   sessionId: string
   welcomeMessage: string
+  interaction?: ChatInteraction | null
   accessToken: string
   userType?: string
   expiresAt?: string
+}
+
+export interface ChatOption {
+  label: string
+  value: string
+}
+
+export interface ChatInteractionField {
+  key: string
+  label: string
+  type?: string
+  options?: ChatOption[]
+  allow_custom?: boolean
+  custom_key?: string
+  placeholder?: string
+}
+
+export interface ChatInteractionItem {
+  key: string
+  label: string
+}
+
+export interface ChatInteraction {
+  id: string
+  groupId: string
+  groupName: string
+  kind: string
+  prompt: string
+  allowFreeText?: boolean
+  submitLabel?: string
+  field?: string
+  options?: ChatOption[]
+  items?: ChatInteractionItem[]
+  fields?: Array<ChatInteractionField | string>
 }
 
 export interface ChatMessage {
@@ -69,6 +104,7 @@ export interface ChatMessageResponse {
   state: string
   progress: number
   completed: boolean
+  interaction?: ChatInteraction | null
 }
 
 export interface ChatProgressResponse {
@@ -77,6 +113,7 @@ export interface ChatProgressResponse {
   completedGroups: string[]
   pendingGroups: string[]
   missingFields: Record<string, string[]>
+  interaction?: ChatInteraction | null
 }
 
 export interface SessionMetadata {
