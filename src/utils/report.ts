@@ -5,6 +5,13 @@ export interface NormalizedReportSection {
   items: string[]
 }
 
+export interface ReportRecommendationPreviewItem {
+  id: string
+  priorityLabel: string
+  title: string
+  description: string
+}
+
 export interface NormalizedReport {
   generatedAt: string
   summary: string
@@ -97,6 +104,21 @@ function resolvePayload(report: Record<string, unknown>) {
     return nestedPayload
   }
 
+  const contentPayload = asObject(report.content)
+  if (contentPayload) {
+    const contentReport = asObject(contentPayload.report)
+    if (contentReport) {
+      return contentReport
+    }
+
+    const contentReportData = asObject(contentPayload.report_data)
+    if (contentReportData) {
+      return contentReportData
+    }
+
+    return contentPayload
+  }
+
   return report
 }
 
@@ -163,6 +185,55 @@ export function normalizeReportRecord(report: Record<string, unknown> | null | u
     generatedAt: generatedAt || undefined,
     report: payload
   }
+}
+
+export function getReportRecommendationPreview(
+  report: Record<string, unknown> | null | undefined,
+  limit = 4
+) {
+  const normalizedRecord = normalizeReportRecord(report)
+  if (!normalizedRecord) {
+    return [] as ReportRecommendationPreviewItem[]
+  }
+
+  const payload = resolvePayload(normalizedRecord)
+  const recommendations = asObject(payload.recommendations)
+  if (!recommendations) {
+    return [] as ReportRecommendationPreviewItem[]
+  }
+
+  const priorityPairs = [
+    ['priority1', '优先级一'],
+    ['priority2', '优先级二'],
+    ['priority3', '优先级三']
+  ] as const
+
+  const items: ReportRecommendationPreviewItem[] = []
+
+  for (const [key, priorityLabel] of priorityPairs) {
+    const recommendationItems = Array.isArray(recommendations[key]) ? recommendations[key] : []
+    for (const item of recommendationItems) {
+      const record = asObject(item)
+      if (!record) {
+        continue
+      }
+
+      const title = asString(record.title)
+      const description = asString(record.description)
+      if (!title && !description) {
+        continue
+      }
+
+      items.push({
+        id: asString(record.id) || `${key}-${items.length + 1}`,
+        priorityLabel,
+        title: title || description,
+        description
+      })
+    }
+  }
+
+  return items.slice(0, Math.max(1, limit))
 }
 
 export function normalizeLatestReport(reports: Array<Record<string, unknown>> | null | undefined) {
