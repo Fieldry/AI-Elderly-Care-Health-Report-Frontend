@@ -15,7 +15,12 @@ import {
   PROFILE_GROUPS,
   serializeProfilePayload
 } from '@/utils/profile'
-import { getReportGeneratedAt, getReportId, getSequentialReportName } from '@/utils/report'
+import {
+  getReportGeneratedAt,
+  getReportId,
+  getReportRecommendationPreview,
+  getSequentialReportName
+} from '@/utils/report'
 
 const props = defineProps<{
   elderlyId: string
@@ -49,6 +54,15 @@ const sortedReports = computed(() =>
   [...familyReports.value].sort((left, right) =>
     getReportGeneratedAt(right).localeCompare(getReportGeneratedAt(left))
   )
+)
+const reportCards = computed(() =>
+  sortedReports.value.map((report, index) => ({
+    report,
+    reportId: getReportId(report),
+    reportTitle: getSequentialReportName(index + 1),
+    generatedAt: getReportGeneratedAt(report),
+    recommendations: getReportRecommendationPreview(report, 4)
+  }))
 )
 const activeReport = computed(() => {
   if (!selectedReportId.value) {
@@ -310,30 +324,57 @@ onMounted(async () => {
         <section class="surface-card reports-shell">
           <header class="reports-shell__header">
             <h3>报告列表</h3>
-            <span>{{ reportsLoading ? '加载中' : sortedReports.length > 0 ? `${sortedReports.length} 份` : '0 份' }}</span>
+            <span>{{ reportsLoading ? '加载中' : reportCards.length > 0 ? `${reportCards.length} 份` : '0 份' }}</span>
           </header>
 
-          <div v-if="sortedReports.length > 0" class="report-list scroll-panel">
+          <div v-if="reportCards.length > 0" class="report-list scroll-panel">
             <article
-              v-for="(report, index) in sortedReports"
-              :key="getReportId(report) || JSON.stringify(report)"
+              v-for="reportCard in reportCards"
+              :key="reportCard.reportId || JSON.stringify(reportCard.report)"
               class="report-item"
             >
-              <div>
-                <strong>{{ getSequentialReportName(index + 1) }}</strong>
-                <p>{{ formatDateTime(getReportGeneratedAt(report)) }}</p>
+              <div class="report-item__meta">
+                <strong>{{ reportCard.reportTitle }}</strong>
+                <p>{{ formatDateTime(reportCard.generatedAt) }}</p>
               </div>
+
+              <section class="report-item__suggestions">
+                <div class="report-item__suggestions-header">
+                  <h4>建议部分</h4>
+                  <span>{{ reportCard.recommendations.length > 0 ? `展示 ${reportCard.recommendations.length} 条` : '暂无建议' }}</span>
+                </div>
+
+                <ul v-if="reportCard.recommendations.length > 0" class="report-item__suggestion-list">
+                  <li
+                    v-for="item in reportCard.recommendations"
+                    :key="`${reportCard.reportId}-${item.id}`"
+                    class="report-item__suggestion"
+                  >
+                    <p class="report-item__suggestion-priority">{{ item.priorityLabel }}</p>
+                    <strong>{{ item.title }}</strong>
+                    <p v-if="item.description" class="report-item__suggestion-description">{{ item.description }}</p>
+                  </li>
+                </ul>
+
+                <p v-else class="report-item__suggestion-empty">当前报告未返回可展示的结构化建议内容。</p>
+              </section>
+
               <div class="report-item__actions">
-                <button class="secondary-button" type="button" @click="openReportDetail(getReportId(report))">
+                <button
+                  class="secondary-button"
+                  type="button"
+                  :disabled="!reportCard.reportId"
+                  @click="openReportDetail(reportCard.reportId)"
+                >
                   查看报告
                 </button>
                 <button
                   class="ghost-button"
                   type="button"
-                  :disabled="downloadingReportId === getReportId(report)"
-                  @click="handleDownloadReport(getReportId(report))"
+                  :disabled="!reportCard.reportId || downloadingReportId === reportCard.reportId"
+                  @click="handleDownloadReport(reportCard.reportId)"
                 >
-                  {{ downloadingReportId === getReportId(report) ? '导出中...' : '导出 PDF' }}
+                  {{ downloadingReportId === reportCard.reportId ? '导出中...' : '导出 PDF' }}
                 </button>
               </div>
             </article>
@@ -366,14 +407,15 @@ onMounted(async () => {
 .family-detail-page {
   display: grid;
   gap: 18px;
+  min-height: calc(100dvh - 8.5rem);
 }
 
 .detail-layout {
-  --workspace-panel-height: min(44rem, calc(100dvh - 11rem));
+  --workspace-panel-height: calc(100dvh - 8.5rem);
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.88fr);
   gap: 20px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .detail-form-card,
@@ -407,7 +449,7 @@ onMounted(async () => {
   line-height: 1.7;
 }
 
-  .detail-form-card__actions {
+.detail-form-card__actions {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
@@ -489,18 +531,96 @@ onMounted(async () => {
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  gap: 12px;
+  align-content: start;
+  gap: 14px;
   overflow: auto;
   padding-right: 6px;
 }
 
 .report-item {
-  padding: 14px 16px;
-  border-radius: 18px;
+  padding: 16px 18px 18px;
+  border-radius: 22px;
   border: 1px solid rgba(90, 142, 209, 0.12);
   background: rgba(255, 255, 255, 0.84);
   display: grid;
+  gap: 14px;
+}
+
+.report-item__meta {
+  display: grid;
+  gap: 4px;
+}
+
+.report-item__suggestions {
+  display: grid;
   gap: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(245, 251, 255, 0.92), rgba(238, 247, 253, 0.84));
+  border: 1px solid rgba(120, 164, 199, 0.14);
+}
+
+.report-item__suggestions-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.report-item__suggestions-header h4 {
+  margin: 0;
+  color: var(--ink-strong);
+  font-size: 1rem;
+}
+
+.report-item__suggestions-header span,
+.report-item__suggestion-priority,
+.report-item__suggestion-description,
+.report-item__suggestion-empty {
+  color: var(--ink-muted);
+}
+
+.report-item__suggestion-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.report-item__suggestion {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(90, 142, 209, 0.12);
+}
+
+.report-item__suggestion strong {
+  display: block;
+  color: var(--ink-strong);
+  line-height: 1.6;
+}
+
+.report-item__suggestion-priority,
+.report-item__suggestion-description,
+.report-item__suggestion-empty {
+  margin: 0;
+  line-height: 1.7;
+}
+
+.report-item__suggestion-priority {
+  margin-bottom: 4px;
+  font-size: 0.86rem;
+  letter-spacing: 0.04em;
+}
+
+.report-item__suggestion-description {
+  margin-top: 6px;
+  font-size: 0.92rem;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }
 
 .report-item p {
@@ -513,6 +633,8 @@ onMounted(async () => {
   gap: 10px;
   flex-wrap: wrap;
   align-items: center;
+  margin-top: auto;
+  padding-top: 2px;
 }
 
 .loading-card,
@@ -541,11 +663,16 @@ onMounted(async () => {
     grid-template-columns: 1fr;
     --workspace-panel-height: auto;
   }
+
+  .family-detail-page {
+    min-height: auto;
+  }
 }
 
 @media (max-width: 760px) {
   .detail-form-card__header,
-  .reports-shell__header {
+  .reports-shell__header,
+  .report-item__suggestions-header {
     flex-direction: column;
     align-items: stretch;
   }
