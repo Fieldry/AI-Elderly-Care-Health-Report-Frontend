@@ -259,8 +259,6 @@ onMounted(async () => {
         <header class="detail-form-card__header">
           <div>
             <p class="eyebrow">当前老人</p>
-            <h1>{{ displayTitle }}</h1>
-            <p>按分组补充老人基本信息、功能状态、慢病与社会支持等字段。</p>
           </div>
 
           <div class="detail-form-card__actions">
