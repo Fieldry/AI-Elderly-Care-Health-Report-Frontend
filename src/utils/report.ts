@@ -12,6 +12,15 @@ export interface ReportRecommendationPreviewItem {
   description: string
 }
 
+export interface ReportRiskFactorPreviewItem {
+  id: string
+  timeframeLabel: string
+  name: string
+  description: string
+  timeframe: string
+  level: string
+}
+
 export interface NormalizedReport {
   generatedAt: string
   summary: string
@@ -229,6 +238,56 @@ export function getReportRecommendationPreview(
         priorityLabel,
         title: title || description,
         description
+      })
+    }
+  }
+
+  return items.slice(0, Math.max(1, limit))
+}
+
+export function getReportRiskFactorPreview(
+  report: Record<string, unknown> | null | undefined,
+  limit = 4
+) {
+  const normalizedRecord = normalizeReportRecord(report)
+  if (!normalizedRecord) {
+    return [] as ReportRiskFactorPreviewItem[]
+  }
+
+  const payload = resolvePayload(normalizedRecord)
+  const riskFactors = asObject(payload.riskFactors)
+  if (!riskFactors) {
+    return [] as ReportRiskFactorPreviewItem[]
+  }
+
+  const riskPairs = [
+    ['shortTerm', '近期风险'],
+    ['midTerm', '中期风险']
+  ] as const
+
+  const items: ReportRiskFactorPreviewItem[] = []
+
+  for (const [key, timeframeLabel] of riskPairs) {
+    const riskItems = Array.isArray(riskFactors[key]) ? riskFactors[key] : []
+    for (const item of riskItems) {
+      const record = asObject(item)
+      if (!record) {
+        continue
+      }
+
+      const name = asString(record.name)
+      const description = asString(record.description)
+      if (!name && !description) {
+        continue
+      }
+
+      items.push({
+        id: `${key}-${items.length + 1}`,
+        timeframeLabel,
+        name: name || description,
+        description,
+        timeframe: asString(record.timeframe),
+        level: asString(record.level)
       })
     }
   }
