@@ -94,6 +94,9 @@ const selectedSummaryItems = computed(() => {
     }
   ]
 })
+const selectedRiskFactors = computed(() =>
+  (selectedOverview.value?.high_risk_reasons || []).filter((item) => item.trim())
+)
 
 function formatDateTime(value: string) {
   if (!value) {
@@ -317,11 +320,17 @@ onMounted(async () => {
           </div>
 
           <article class="overview-note">
-            <strong>功能状态</strong>
-            <p>{{ selectedOverview?.functional_status_text || '暂无' }}</p>
+            <p class="overview-note__label">功能状态</p>
+            <p class="overview-note__content">{{ selectedOverview?.functional_status_text || '暂无' }}</p>
           </article>
 
-
+          <article class="overview-note overview-note--full">
+            <p class="overview-note__label">风险因素</p>
+            <ul v-if="selectedRiskFactors.length > 0" class="overview-note__list">
+              <li v-for="item in selectedRiskFactors" :key="item">{{ item }}</li>
+            </ul>
+            <p v-else class="overview-note__content">暂无明确风险因素</p>
+          </article>
 
         </article>
 
@@ -368,7 +377,6 @@ onMounted(async () => {
 .doctor-summary-card h2,
 .overview-card strong,
 .summary-item strong,
-.overview-note strong,
 .record-item__top strong {
   color: var(--ink-strong);
 }
@@ -384,7 +392,7 @@ onMounted(async () => {
 .record-item__meta,
 .record-item__summary,
 .summary-item span,
-.overview-note p,
+.overview-note__label,
 .overview-card span,
 .muted-text {
   color: var(--ink-muted);
@@ -397,7 +405,7 @@ onMounted(async () => {
 
 .doctor-summary-card__meta,
 .record-item__summary,
-.overview-note p {
+.overview-note__label {
   margin: 8px 0 0;
   line-height: 1.7;
 }
@@ -490,6 +498,27 @@ onMounted(async () => {
 .summary-item strong {
   display: block;
   margin-top: 10px;
+}
+
+.overview-note__label {
+  color: var(--ink-muted);
+  font-weight: 400;
+}
+
+.overview-note__content,
+.overview-note__list {
+  margin: 10px 0 0;
+  color: var(--ink-strong);
+  font-weight: 700;
+  line-height: 1.8;
+}
+
+.overview-note__list {
+  padding-left: 20px;
+}
+
+.overview-note__list li + li {
+  margin-top: 6px;
 }
 
 .chip-list {
