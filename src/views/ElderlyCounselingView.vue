@@ -663,10 +663,10 @@ onMounted(async () => {
 .chat-card {
   position: relative;
   overflow: hidden;
-  padding: 28px;
+  padding: 24px;
   display: flex;
   flex-direction: column;
-  min-height: clamp(42rem, calc(100vh - 9.5rem), 52rem);
+  min-height: clamp(38rem, calc(100vh - 10.5rem), 46rem);
   background:
     radial-gradient(circle at top right, rgba(153, 220, 202, 0.18), transparent 24rem),
     linear-gradient(180deg, rgba(252, 254, 255, 0.98), rgba(236, 247, 248, 0.94));
@@ -690,7 +690,7 @@ onMounted(async () => {
 .chat-card__header {
   display: flex;
   justify-content: space-between;
-  gap: 16px;
+  gap: 14px;
   align-items: flex-start;
 }
 
@@ -705,15 +705,15 @@ onMounted(async () => {
 }
 
 .chat-card__header h1 {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   color: var(--ink-strong);
-  font-size: clamp(2rem, 3vw, 2.65rem);
+  font-size: clamp(1.9rem, 2.7vw, 2.4rem);
 }
 
 .chat-card__lead {
-  margin: 14px 0 0;
+  margin: 10px 0 0;
   color: var(--ink-muted);
-  line-height: 1.8;
+  line-height: 1.75;
 }
 
 .error-banner {
@@ -725,26 +725,47 @@ onMounted(async () => {
 }
 
 .chat-stream {
-  margin-top: 18px;
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
+  margin-top: 14px;
+  flex: none;
+  height: clamp(19rem, calc(100vh - 28rem), 26rem);
+  min-height: 19rem;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: grid;
-  gap: 16px;
-  padding: 22px 18px;
-  padding-right: 12px;
+  gap: 14px;
+  padding: 18px 16px;
+  padding-right: 10px;
   border-radius: 28px;
   border: 1px solid rgba(83, 169, 183, 0.12);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(240, 248, 250, 0.88));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.82),
     0 18px 32px rgba(35, 84, 99, 0.05);
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(78, 135, 197, 0.45) rgba(232, 241, 248, 0.9);
+  overscroll-behavior: contain;
+}
+
+.chat-stream::-webkit-scrollbar {
+  width: 10px;
+}
+
+.chat-stream::-webkit-scrollbar-track {
+  background: rgba(232, 241, 248, 0.9);
+  border-radius: 999px;
+}
+
+.chat-stream::-webkit-scrollbar-thumb {
+  background: rgba(78, 135, 197, 0.45);
+  border-radius: 999px;
+  border: 2px solid rgba(232, 241, 248, 0.9);
 }
 
 .message-bubble {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 14px;
+  gap: 12px;
   align-items: flex-start;
   max-width: 92%;
 }
@@ -784,7 +805,7 @@ onMounted(async () => {
 }
 
 .message-bubble__panel {
-  padding: 16px 18px;
+  padding: 14px 16px;
   border-radius: 24px;
   box-shadow: 0 14px 30px rgba(35, 84, 99, 0.08);
 }
@@ -834,11 +855,11 @@ onMounted(async () => {
 }
 
 .chat-composer {
-  margin-top: 18px;
+  margin-top: 14px;
 }
 
 .composer-shell {
-  padding: 18px;
+  padding: 16px;
   border-radius: 28px;
   border: 1px solid rgba(83, 169, 183, 0.12);
   background: rgba(255, 255, 255, 0.88);
@@ -868,9 +889,9 @@ onMounted(async () => {
   width: 100%;
   resize: none;
   border-radius: 22px;
-  padding: 16px 18px;
-  min-height: 7rem;
-  line-height: 1.8;
+  padding: 14px 16px;
+  min-height: 6rem;
+  line-height: 1.7;
   border-color: rgba(83, 169, 183, 0.16);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 249, 252, 0.96));
 }
@@ -1120,6 +1141,10 @@ onMounted(async () => {
 
   .chat-card {
     min-height: auto;
+  }
+
+  .chat-stream {
+    height: 24rem;
   }
 }
 
