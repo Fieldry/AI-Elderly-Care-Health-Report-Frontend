@@ -1444,6 +1444,14 @@ onMounted(async () => {
               新建独立评估
             </button>
             <button
+              class="secondary-button summary-card__action"
+              type="button"
+              :disabled="loading || !elderlyToken"
+              @click="router.push('/elderly/counseling')"
+            >
+              进入心理咨询
+            </button>
+            <button
               class="primary-button summary-card__action"
               type="button"
               :disabled="!canConfirmReport"
