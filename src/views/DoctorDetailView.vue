@@ -400,7 +400,6 @@ onMounted(async () => {
           <header class="detail-card__header">
             <div>
               <p class="eyebrow">当前老人</p>
-              <h1>{{ selectedTitle }}</h1>
               <p class="detail-card__meta">
                 更新时间：{{ formatDateTime(selectedDetail.updated_at || selectedDetail.created_at) }}
               </p>
@@ -429,28 +428,6 @@ onMounted(async () => {
                 <span>慢病摘要</span>
                 <strong>{{ selectedOverview?.chronic_summary || '暂无' }}</strong>
               </article>
-            </div>
-
-            <div v-if="(selectedOverview?.risk_tags || []).length > 0" class="chip-list">
-              <span v-for="tag in selectedOverview?.risk_tags" :key="tag" class="chip">{{ tag }}</span>
-            </div>
-
-            <div class="overview-columns">
-              <section class="workspace-section">
-                <h2>主要问题</h2>
-                <ul v-if="(selectedOverview?.main_problems || []).length > 0" class="plain-list">
-                  <li v-for="item in selectedOverview?.main_problems" :key="item">{{ item }}</li>
-                </ul>
-                <p v-else class="muted-text">暂无主要问题摘要。</p>
-              </section>
-
-              <section class="workspace-section">
-                <h2>建议动作</h2>
-                <ul v-if="(selectedOverview?.recommended_actions || []).length > 0" class="plain-list">
-                  <li v-for="item in selectedOverview?.recommended_actions" :key="item">{{ item }}</li>
-                </ul>
-                <p v-else class="muted-text">暂无建议动作。</p>
-              </section>
             </div>
 
             <section class="workspace-section">
