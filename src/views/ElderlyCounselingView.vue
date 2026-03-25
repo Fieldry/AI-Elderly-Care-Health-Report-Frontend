@@ -462,10 +462,9 @@ onMounted(async () => {
       <article class="surface-card chat-card">
         <header class="chat-card__header">
           <div class="chat-card__intro">
-            <p class="eyebrow">长者端</p>
             <h1>心理咨询对话</h1>
             <p class="chat-card__lead">
-              用陪伴式对话聊聊最近的情绪、烦心事和生活状态。您可以慢慢说，系统会尽量用温和、清晰的方式回应。
+              用陪伴式对话聊聊最近的情绪、烦心事和生活状态。您可以慢慢说，我们会尽量用温和、清晰的方式回应。
             </p>
           </div>
 

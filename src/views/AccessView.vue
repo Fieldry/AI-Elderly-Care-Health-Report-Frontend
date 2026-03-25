@@ -182,7 +182,6 @@ onMounted(async () => {
       <ul class="access-card__bullets">
         <li v-for="bullet in roleContent.bullets" :key="bullet">{{ bullet }}</li>
       </ul>
-      <p class="access-card__note">{{ healthStatusText }}</p>
     </section>
 
     <section class="access-card access-card--form">
@@ -234,7 +233,7 @@ onMounted(async () => {
       <template v-else>
         <h2>开始长者评估</h2>
         <p class="access-card__description">
-          长者端无需登录即可直接开始当前评估会话，系统会自动申请专属 token 并持久化当前评估状态。
+          长者端无需登录即可直接开始当前评估会话。
         </p>
       </template>
 
