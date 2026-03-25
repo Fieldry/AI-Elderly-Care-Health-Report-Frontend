@@ -1014,6 +1014,7 @@ onMounted(async () => {
 
 .summary-card__action {
   width: 100%;
+  white-space: nowrap;
 }
 
 .panel-header {
