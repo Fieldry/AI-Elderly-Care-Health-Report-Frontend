@@ -27,6 +27,10 @@ export default defineConfig({
         target: proxyTarget,
         changeOrigin: true
       },
+      '/counseling': {
+        target: proxyTarget,
+        changeOrigin: true
+      },
       '/family': {
         target: proxyTarget,
         changeOrigin: true
@@ -35,7 +39,7 @@ export default defineConfig({
         target: proxyTarget,
         changeOrigin: true
       },
-      '/elderly': {
+      '/elderly/me': {
         target: proxyTarget,
         changeOrigin: true
       },
