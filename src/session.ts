@@ -13,6 +13,7 @@ import type {
 const STORAGE_KEY = 'ai-elderly-care.session'
 const LAST_ELDERLY_SESSION_KEY = 'ai-elderly-care.last-elderly-session'
 const ELDERLY_SESSION_SNAPSHOT_KEY = 'ai-elderly-care.elderly-session-snapshots'
+const ELDERLY_COUNSELING_SESSION_MAP_KEY = 'ai-elderly-care.elderly-counseling-session-map'
 const FAMILY_SESSION_MAP_KEY = 'ai-elderly-care.family-session-map'
 const FAMILY_CONVERSATION_SNAPSHOT_KEY = 'ai-elderly-care.family-conversation-snapshots'
 
@@ -133,6 +134,35 @@ function writeFamilySessionMap(nextMap: Record<string, string>) {
   }
 
   window.localStorage.setItem(FAMILY_SESSION_MAP_KEY, JSON.stringify(nextMap))
+}
+
+function readElderlyCounselingSessionMap() {
+  if (typeof window === 'undefined') {
+    return {} as Record<string, string>
+  }
+
+  const raw = window.localStorage.getItem(ELDERLY_COUNSELING_SESSION_MAP_KEY)
+  if (!raw) {
+    return {} as Record<string, string>
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    )
+  } catch {
+    window.localStorage.removeItem(ELDERLY_COUNSELING_SESSION_MAP_KEY)
+    return {} as Record<string, string>
+  }
+}
+
+function writeElderlyCounselingSessionMap(nextMap: Record<string, string>) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.setItem(ELDERLY_COUNSELING_SESSION_MAP_KEY, JSON.stringify(nextMap))
 }
 
 function normalizeSessionMetadata(raw: unknown): SessionMetadata | null {
@@ -382,6 +412,7 @@ const state = reactive({
   session: readSession(),
   lastElderlySession: readLastElderlySession(),
   elderlySessionSnapshots: readElderlySessionSnapshots(),
+  elderlyCounselingSessionMap: readElderlyCounselingSessionMap(),
   familySessionMap: readFamilySessionMap(),
   familyConversationSnapshots: readFamilyConversationSnapshots()
 })
@@ -489,6 +520,29 @@ export function clearStoredElderlySessionSnapshot(sessionId: string) {
 
 export function getStoredFamilyConversationSessionId(elderlyId: string) {
   return state.familySessionMap[elderlyId] || ''
+}
+
+export function getStoredElderlyCounselingSessionId(userId: string) {
+  return state.elderlyCounselingSessionMap[userId] || ''
+}
+
+export function setStoredElderlyCounselingSessionId(userId: string, sessionId: string) {
+  state.elderlyCounselingSessionMap = {
+    ...state.elderlyCounselingSessionMap,
+    [userId]: sessionId
+  }
+  writeElderlyCounselingSessionMap(state.elderlyCounselingSessionMap)
+}
+
+export function clearStoredElderlyCounselingSessionId(userId: string) {
+  if (!state.elderlyCounselingSessionMap[userId]) {
+    return
+  }
+
+  const nextMap = { ...state.elderlyCounselingSessionMap }
+  delete nextMap[userId]
+  state.elderlyCounselingSessionMap = nextMap
+  writeElderlyCounselingSessionMap(nextMap)
 }
 
 export function getStoredFamilyConversationSnapshot(elderlyId: string) {

@@ -99,6 +99,15 @@ export interface ChatMessage {
   timestamp?: string
 }
 
+export interface CounselingSessionInfo {
+  sessionId: string
+  userId: string
+  title: string
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface ChatMessageResponse {
   message: string
   state: string
