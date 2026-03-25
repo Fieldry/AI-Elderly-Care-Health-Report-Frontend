@@ -626,7 +626,7 @@ onMounted(async () => {
 
 .doctor-detail-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  grid-template-columns: minmax(280px, 0.92fr) minmax(0, 1.08fr);
   gap: 20px;
   align-items: start;
 }
