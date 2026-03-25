@@ -44,7 +44,10 @@ const selectedReportDetail = ref<Record<string, unknown> | null>(null)
 
 const managementForm = reactive({
   isKeyCase: false,
-  managementStatus: 'normal',
+  managementStatus: 'normal'
+})
+
+const sharedActionForm = reactive({
   contactedFamily: false,
   arrangedRevisit: false,
   referred: false,
@@ -55,10 +58,6 @@ const followupForm = reactive({
   visitType: '电话' as (typeof visitTypeOptions)[number],
   findings: '',
   recommendationsText: '',
-  contactedFamily: false,
-  arrangedRevisit: false,
-  referred: false,
-  nextFollowupAt: '',
   notes: ''
 })
 
@@ -171,10 +170,6 @@ function resetFollowupForm() {
   followupForm.visitType = '电话'
   followupForm.findings = ''
   followupForm.recommendationsText = ''
-  followupForm.contactedFamily = false
-  followupForm.arrangedRevisit = false
-  followupForm.referred = false
-  followupForm.nextFollowupAt = ''
   followupForm.notes = ''
 }
 
@@ -186,10 +181,10 @@ function closeReportModal() {
 function applyManagementForm(detail: DoctorElderlyDetail) {
   managementForm.isKeyCase = detail.management.is_key_case
   managementForm.managementStatus = detail.management.management_status || 'normal'
-  managementForm.contactedFamily = detail.management.contacted_family
-  managementForm.arrangedRevisit = detail.management.arranged_revisit
-  managementForm.referred = detail.management.referred
-  managementForm.nextFollowupAt = formatDateTimeLocalInput(detail.management.next_followup_at)
+  sharedActionForm.contactedFamily = detail.management.contacted_family
+  sharedActionForm.arrangedRevisit = detail.management.arranged_revisit
+  sharedActionForm.referred = detail.management.referred
+  sharedActionForm.nextFollowupAt = formatDateTimeLocalInput(detail.management.next_followup_at)
 }
 
 async function openReportDetail(reportId: string) {
@@ -252,10 +247,10 @@ async function saveManagement() {
     await updateDoctorManagement(props.elderlyId, doctorToken.value, {
       isKeyCase: managementForm.isKeyCase,
       managementStatus: managementForm.managementStatus,
-      contactedFamily: managementForm.contactedFamily,
-      arrangedRevisit: managementForm.arrangedRevisit,
-      referred: managementForm.referred,
-      nextFollowupAt: managementForm.nextFollowupAt || undefined
+      contactedFamily: sharedActionForm.contactedFamily,
+      arrangedRevisit: sharedActionForm.arrangedRevisit,
+      referred: sharedActionForm.referred,
+      nextFollowupAt: sharedActionForm.nextFollowupAt || undefined
     })
 
     successMessage.value = '管理状态已更新。'
@@ -286,10 +281,10 @@ async function submitFollowup() {
       visitType: followupForm.visitType,
       findings: followupForm.findings.trim(),
       recommendations: parseRecommendations(followupForm.recommendationsText),
-      contactedFamily: followupForm.contactedFamily,
-      arrangedRevisit: followupForm.arrangedRevisit,
-      referred: followupForm.referred,
-      nextFollowupAt: followupForm.nextFollowupAt || undefined,
+      contactedFamily: sharedActionForm.contactedFamily,
+      arrangedRevisit: sharedActionForm.arrangedRevisit,
+      referred: sharedActionForm.referred,
+      nextFollowupAt: sharedActionForm.nextFollowupAt || undefined,
       notes: followupForm.notes.trim()
     })
 
@@ -351,6 +346,58 @@ onMounted(async () => {
 
     <section v-else-if="selectedDetail" class="doctor-detail-layout">
       <div class="doctor-main-column">
+        <section class="surface-card overview-summary-card">
+          <header class="section-header">
+            <div>
+              <p class="eyebrow">医疗概览</p>
+              <h2>{{ selectedTitle }}</h2>
+              <p>基于当前画像、报告和管理记录汇总当前重点。</p>
+            </div>
+            <span>更新时间：{{ formatDateTime(selectedDetail.updated_at || selectedDetail.created_at) }}</span>
+          </header>
+
+          <div class="overview-grid">
+            <article class="overview-card">
+              <span>当前风险</span>
+              <strong>{{ formatRiskLevel(selectedOverview?.current_risk_level) }}</strong>
+            </article>
+            <article class="overview-card">
+              <span>管理状态</span>
+              <strong>{{ formatManagementStatus(selectedDetail.management.management_status) }}</strong>
+            </article>
+            <article class="overview-card">
+              <span>功能状态</span>
+              <strong>{{ selectedOverview?.functional_status_text || '暂无' }}</strong>
+            </article>
+            <article class="overview-card">
+              <span>慢病摘要</span>
+              <strong>{{ selectedOverview?.chronic_summary || '暂无' }}</strong>
+            </article>
+          </div>
+
+          <div v-if="(selectedOverview?.risk_tags || []).length > 0" class="chip-list">
+            <span v-for="tag in selectedOverview?.risk_tags" :key="tag" class="chip">{{ tag }}</span>
+          </div>
+
+          <div class="overview-columns">
+            <section class="workspace-section">
+              <h2>主要问题</h2>
+              <ul v-if="(selectedOverview?.main_problems || []).length > 0" class="plain-list">
+                <li v-for="item in selectedOverview?.main_problems" :key="item">{{ item }}</li>
+              </ul>
+              <p v-else class="muted-text">暂无主要问题摘要。</p>
+            </section>
+
+            <section class="workspace-section">
+              <h2>建议动作</h2>
+              <ul v-if="(selectedOverview?.recommended_actions || []).length > 0" class="plain-list">
+                <li v-for="item in selectedOverview?.recommended_actions" :key="item">{{ item }}</li>
+              </ul>
+              <p v-else class="muted-text">暂无建议动作。</p>
+            </section>
+          </div>
+        </section>
+
         <section class="surface-card report-list-card">
           <header class="section-header">
             <div>
@@ -400,6 +447,7 @@ onMounted(async () => {
           <header class="detail-card__header">
             <div>
               <p class="eyebrow">当前老人</p>
+              <h1>{{ selectedTitle }}</h1>
               <p class="detail-card__meta">
                 更新时间：{{ formatDateTime(selectedDetail.updated_at || selectedDetail.created_at) }}
               </p>
@@ -411,30 +459,11 @@ onMounted(async () => {
           </header>
 
           <div class="clinician-card__body">
-            <div class="overview-grid">
-              <article class="overview-card">
-                <span>当前风险</span>
-                <strong>{{ formatRiskLevel(selectedOverview?.current_risk_level) }}</strong>
-              </article>
-              <article class="overview-card">
-                <span>管理状态</span>
-                <strong>{{ formatManagementStatus(selectedDetail.management.management_status) }}</strong>
-              </article>
-              <article class="overview-card">
-                <span>功能状态</span>
-                <strong>{{ selectedOverview?.functional_status_text || '暂无' }}</strong>
-              </article>
-              <article class="overview-card">
-                <span>慢病摘要</span>
-                <strong>{{ selectedOverview?.chronic_summary || '暂无' }}</strong>
-              </article>
-            </div>
-
             <section class="workspace-section">
               <header class="section-header">
                 <div>
                   <h3>医生管理状态</h3>
-                  <p>这部分仅写入医生侧管理表，不会改写老人画像。</p>
+                  <p>协同动作设置会同时用于管理状态保存和新建随访，避免重复录入。</p>
                 </div>
               </header>
 
@@ -453,25 +482,34 @@ onMounted(async () => {
                   </select>
                 </label>
 
-                <label class="field field--checkbox">
-                  <input v-model="managementForm.contactedFamily" type="checkbox" />
-                  <span>已联系家属</span>
-                </label>
+                <section class="shared-action-card field--full">
+                  <div class="shared-action-card__header">
+                    <strong>协同动作设置</strong>
+                    <p>保存管理状态和提交随访记录时，都会使用以下设置。</p>
+                  </div>
 
-                <label class="field field--checkbox">
-                  <input v-model="managementForm.arrangedRevisit" type="checkbox" />
-                  <span>已安排复诊/复评</span>
-                </label>
+                  <div class="shared-action-card__grid">
+                    <label class="field field--checkbox">
+                      <input v-model="sharedActionForm.contactedFamily" type="checkbox" />
+                      <span>已联系家属</span>
+                    </label>
 
-                <label class="field field--checkbox">
-                  <input v-model="managementForm.referred" type="checkbox" />
-                  <span>已转诊</span>
-                </label>
+                    <label class="field field--checkbox">
+                      <input v-model="sharedActionForm.arrangedRevisit" type="checkbox" />
+                      <span>已安排复诊/复评</span>
+                    </label>
 
-                <label class="field">
-                  <span>下次随访时间</span>
-                  <input v-model="managementForm.nextFollowupAt" type="datetime-local" />
-                </label>
+                    <label class="field field--checkbox">
+                      <input v-model="sharedActionForm.referred" type="checkbox" />
+                      <span>已转诊</span>
+                    </label>
+
+                    <label class="field">
+                      <span>下次随访时间</span>
+                      <input v-model="sharedActionForm.nextFollowupAt" type="datetime-local" />
+                    </label>
+                  </div>
+                </section>
 
                 <button class="primary-button form-submit" type="submit" :disabled="managementSaving">
                   {{ managementSaving ? '保存中...' : '保存管理状态' }}
@@ -536,26 +574,6 @@ onMounted(async () => {
                   />
                 </label>
 
-                <label class="field field--checkbox">
-                  <input v-model="followupForm.contactedFamily" type="checkbox" />
-                  <span>本次已联系家属</span>
-                </label>
-
-                <label class="field field--checkbox">
-                  <input v-model="followupForm.arrangedRevisit" type="checkbox" />
-                  <span>已安排复诊/复评</span>
-                </label>
-
-                <label class="field field--checkbox">
-                  <input v-model="followupForm.referred" type="checkbox" />
-                  <span>已转诊</span>
-                </label>
-
-                <label class="field">
-                  <span>下次随访时间</span>
-                  <input v-model="followupForm.nextFollowupAt" type="datetime-local" />
-                </label>
-
                 <label class="field field--full">
                   <span>补充备注</span>
                   <textarea
@@ -614,6 +632,7 @@ onMounted(async () => {
   gap: 18px;
 }
 
+.overview-summary-card,
 .report-list-card,
 .clinician-card,
 .loading-card {
@@ -642,6 +661,12 @@ onMounted(async () => {
   margin-top: 10px;
   color: var(--ink-strong);
   font-size: clamp(2rem, 3vw, 2.5rem);
+}
+
+.overview-summary-card h2 {
+  margin: 10px 0 0;
+  color: var(--ink-strong);
+  font-size: clamp(1.8rem, 2.5vw, 2.25rem);
 }
 
 .detail-card__meta,
@@ -832,6 +857,36 @@ onMounted(async () => {
   grid-column: 1 / -1;
 }
 
+.shared-action-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(120, 164, 199, 0.16);
+}
+
+.shared-action-card__header {
+  display: grid;
+  gap: 6px;
+}
+
+.shared-action-card__header strong {
+  color: var(--ink-strong);
+}
+
+.shared-action-card__header p {
+  margin: 0;
+  color: var(--ink-muted);
+  line-height: 1.7;
+}
+
+.shared-action-card__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .error-banner,
 .success-banner {
   margin: 0;
@@ -868,7 +923,8 @@ onMounted(async () => {
   }
 
   .overview-grid,
-  .form-grid {
+  .form-grid,
+  .shared-action-card__grid {
     grid-template-columns: 1fr;
   }
 
