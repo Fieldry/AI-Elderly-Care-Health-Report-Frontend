@@ -462,9 +462,11 @@ onMounted(async () => {
       <article class="surface-card chat-card">
         <header class="chat-card__header">
           <div class="chat-card__intro">
-            <h1>心理咨询对话</h1>
+            <h2>心理咨询对话</h2>
             <p class="chat-card__lead">
-              用陪伴式对话聊聊最近的情绪、烦心事和生活状态。您可以慢慢说，我们会尽量用温和、清晰的方式回应。
+              用陪伴式对话聊聊最近的情绪、烦心事和生活状态。
+              <br>
+              您可以慢慢说，我们会尽量用温和、清晰的方式回应。
             </p>
           </div>
 
@@ -519,7 +521,6 @@ onMounted(async () => {
             <template v-else>
               <div class="composer-shell__header">
                 <label class="composer-label" for="counseling-input">想聊点什么</label>
-                <span>{{ voiceHintText }}</span>
               </div>
               <textarea
                 id="counseling-input"

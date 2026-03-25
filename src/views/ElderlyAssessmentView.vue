@@ -1302,7 +1302,6 @@ onMounted(async () => {
         <header class="chat-card__header">
           <div class="chat-card__intro">
             <h2>对话采集</h2>
-            <p class="chat-card__lead">系统会把自由对话和几张选择题卡结合起来，尽量让填写过程更轻松。</p>
           </div>
           <div class="chat-card__header-actions">
             <p>这是您的号码，可复制给您的家属绑定</p>
