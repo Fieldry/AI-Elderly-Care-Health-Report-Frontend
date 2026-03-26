@@ -1272,27 +1272,34 @@ async function toggleVoiceInput() {
 watch(
   () => [currentInteraction.value?.id || '', currentInteraction.value?.kind || '', isChatInputMode.value] as const,
   (nextValue, previousValue) => {
+    const [interactionId, interactionKind, chatInputMode] = nextValue
+
+    if (!interactionId || chatInputMode) {
+      if (interactionModalTimer.value) {
+        clearTimeout(interactionModalTimer.value)
+        interactionModalTimer.value = null
+      }
+      interactionModalVisible.value = false
+      return
+    }
+
+    const changed = !previousValue
+      || interactionId !== previousValue[0]
+      || interactionKind !== previousValue[1]
+
+    if (!changed) {
+      return
+    }
+
     if (interactionModalTimer.value) {
       clearTimeout(interactionModalTimer.value)
       interactionModalTimer.value = null
     }
 
-    const [interactionId, interactionKind, chatInputMode] = nextValue
-    if (!interactionId || chatInputMode) {
-      interactionModalVisible.value = false
-      return
-    }
-
-    const shouldOpen = !previousValue
-      || interactionId !== previousValue[0]
-      || interactionKind !== previousValue[1]
-
-    if (shouldOpen) {
-      interactionModalTimer.value = setTimeout(() => {
-        interactionModalVisible.value = true
-        interactionModalTimer.value = null
-      }, 800)
-    }
+    interactionModalTimer.value = setTimeout(() => {
+      interactionModalVisible.value = true
+      interactionModalTimer.value = null
+    }, 800)
   },
   {
     immediate: true
