@@ -83,6 +83,7 @@ const downloadingReportId = ref('')
 const openingSessionReportId = ref('')
 
 const chatBodyRef = ref<HTMLElement | null>(null)
+const interactionModalTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 
 const elderlyToken = computed(() => elderlyAccessSession.value?.token || '')
 const activeReport = computed(() => {
@@ -1271,20 +1272,26 @@ async function toggleVoiceInput() {
 watch(
   () => [currentInteraction.value?.id || '', currentInteraction.value?.kind || '', isChatInputMode.value] as const,
   (nextValue, previousValue) => {
+    if (interactionModalTimer.value) {
+      clearTimeout(interactionModalTimer.value)
+      interactionModalTimer.value = null
+    }
+
     const [interactionId, interactionKind, chatInputMode] = nextValue
     if (!interactionId || chatInputMode) {
       interactionModalVisible.value = false
       return
     }
 
-    if (!previousValue) {
-      interactionModalVisible.value = true
-      return
-    }
+    const shouldOpen = !previousValue
+      || interactionId !== previousValue[0]
+      || interactionKind !== previousValue[1]
 
-    const [previousId, previousKind] = previousValue
-    if (interactionId !== previousId || interactionKind !== previousKind) {
-      interactionModalVisible.value = true
+    if (shouldOpen) {
+      interactionModalTimer.value = setTimeout(() => {
+        interactionModalVisible.value = true
+        interactionModalTimer.value = null
+      }, 800)
     }
   },
   {
