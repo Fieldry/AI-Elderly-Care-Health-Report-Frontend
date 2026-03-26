@@ -1521,7 +1521,7 @@ onMounted(async () => {
       </aside>
     </section>
 
-    <div v-if="showInteractionModal && currentInteraction" class="interaction-modal" @click.self="dismissInteractionModal">
+    <div v-if="showInteractionModal && currentInteraction" class="interaction-modal">
       <article
         class="surface-card interaction-modal__card"
         role="dialog"
