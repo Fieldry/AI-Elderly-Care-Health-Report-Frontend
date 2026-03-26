@@ -1366,7 +1366,7 @@ onMounted(async () => {
                 v-model="inputText"
                 class="composer-textarea"
                 :disabled="loading || sending"
-                placeholder="例如：我今年 82 岁，最近走路容易喘，晚上睡眠一般，洗澡时需要家人帮忙。"
+                placeholder="例如：我今年 82 岁。"
                 rows="1"
                 @keydown.enter.exact.prevent="handleSend"
               />
