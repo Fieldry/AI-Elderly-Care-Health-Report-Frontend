@@ -1362,8 +1362,16 @@ onMounted(async () => {
                 <label class="composer-label">报告生成中</label>
               </div>
               <div class="composer-disabled">
-                <p class="composer-disabled__title">正在生成报告</p>
-                <p class="composer-disabled__text">聊天输入已临时禁用，请稍候查看系统返回结果。</p>
+                <p class="composer-disabled__title">
+                  <span class="generating-spinner" />
+                  正在生成报告
+                </p>
+                <p class="composer-disabled__text">
+                  请您稍等1-2分钟，报告正在生成中......
+                </p>
+                <p class="composer-disabled__text composer-disabled__steps">
+                  正在进行：失能状态判定 → 风险预测 → 健康画像 → 行动计划 → 报告生成
+                </p>
               </div>
             </template>
 
@@ -2038,6 +2046,26 @@ onMounted(async () => {
   margin-top: 6px;
   color: var(--ink-muted);
   line-height: 1.7;
+}
+
+.composer-disabled__steps {
+  font-size: 0.92rem;
+}
+
+.generating-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(83, 169, 183, 0.2);
+  border-top-color: var(--brand-strong);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .interaction-card {
