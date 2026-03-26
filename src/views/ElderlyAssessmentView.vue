@@ -1374,7 +1374,7 @@ onMounted(async () => {
                   正在生成报告
                 </p>
                 <p class="composer-disabled__text">
-                  请您稍等1-2分钟，报告正在生成中......
+                  请您稍等4-5分钟，报告正在生成中......
                 </p>
                 <p class="composer-disabled__text composer-disabled__steps">
                   正在进行：失能状态判定 → 风险预测 → 健康画像 → 行动计划 → 报告生成
