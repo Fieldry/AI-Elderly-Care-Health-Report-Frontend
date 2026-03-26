@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import MarkdownIt from 'markdown-it'
 
 import { ApiError } from '@/api/core'
 import {
@@ -43,6 +44,17 @@ import { mergeProfileSnapshots } from '@/utils/report'
 
 const router = useRouter()
 const { session } = useAuthSession()
+
+const md = new MarkdownIt({
+  html: false,
+  breaks: true,
+  linkify: false
+})
+
+function renderMessageContent(content: string | undefined): string {
+  if (!content) return '...'
+  return md.render(content)
+}
 
 const elderlyAccessSession = ref<ElderlyAuthSession | null>(null)
 
@@ -1333,9 +1345,7 @@ onMounted(async () => {
                   {{ formatDateTime(message.timestamp) }}
                 </span>
               </div>
-              <div class="message-bubble__content">
-                {{ message.content || '...' }}
-              </div>
+              <div class="message-bubble__content markdown-body" v-html="renderMessageContent(message.content)"></div>
             </div>
           </article>
 
@@ -1922,7 +1932,37 @@ onMounted(async () => {
 .message-bubble__content {
   color: var(--ink-strong);
   line-height: 1.8;
-  white-space: pre-wrap;
+}
+
+.message-bubble__content.markdown-body :deep(p) {
+  margin: 0 0 8px;
+}
+
+.message-bubble__content.markdown-body :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.message-bubble__content.markdown-body :deep(h1),
+.message-bubble__content.markdown-body :deep(h2),
+.message-bubble__content.markdown-body :deep(h3),
+.message-bubble__content.markdown-body :deep(h4) {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+  color: var(--ink-strong);
+}
+
+.message-bubble__content.markdown-body :deep(ul),
+.message-bubble__content.markdown-body :deep(ol) {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+.message-bubble__content.markdown-body :deep(li) {
+  margin-bottom: 4px;
+}
+
+.message-bubble__content.markdown-body :deep(strong) {
+  color: var(--ink-strong);
 }
 
 .empty-tip {
