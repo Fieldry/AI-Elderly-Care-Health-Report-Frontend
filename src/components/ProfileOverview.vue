@@ -12,7 +12,7 @@ const props = withDefaults(
     emptyDescription?: string
   }>(),
   {
-    title: '结构化画像',
+    title: '结构化画像（可下滑查看）',
     emptyTitle: '画像尚未形成',
     emptyDescription: '请先完成对话采集或补全信息，系统才能展示可读的画像摘要。'
   }

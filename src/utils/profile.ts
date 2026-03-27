@@ -22,7 +22,7 @@ const basicFields: ProfileFieldDefinition[] = [
     label: '婚姻状况',
     group: '基本信息',
     type: 'select',
-    options: ['在婚', '丧偶', '离婚', '未婚', '其他']
+    options: ['已婚', '丧偶', '离婚', '未婚', '其他']
   }
 ]
 
