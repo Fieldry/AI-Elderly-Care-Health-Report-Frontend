@@ -84,6 +84,7 @@ const openingSessionReportId = ref('')
 
 const chatBodyRef = ref<HTMLElement | null>(null)
 const interactionModalTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+const suppressModalReopen = ref(false)
 
 const elderlyToken = computed(() => elderlyAccessSession.value?.token || '')
 const activeReport = computed(() => {
@@ -1116,8 +1117,10 @@ async function handleConfirmReportGeneration() {
   }
 
   dismissInteractionModal()
+  suppressModalReopen.value = true
   const submitted = await submitStructuredInteraction({ action: 'confirm' })
   if (!submitted && currentInteraction.value?.kind === 'confirm') {
+    suppressModalReopen.value = false
     interactionModalVisible.value = true
   }
 }
@@ -1294,6 +1297,11 @@ watch(
     if (interactionModalTimer.value) {
       clearTimeout(interactionModalTimer.value)
       interactionModalTimer.value = null
+    }
+
+    if (suppressModalReopen.value) {
+      suppressModalReopen.value = false
+      return
     }
 
     interactionModalTimer.value = setTimeout(() => {
