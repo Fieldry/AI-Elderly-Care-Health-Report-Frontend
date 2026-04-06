@@ -1,3 +1,4 @@
+const defaultBackendAddress = '82.156.24.217:8080'
 const backendOrigin = (import.meta.env.VITE_BACKEND_ORIGIN || '').trim()
 const legacyApiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').trim()
 const speechSocketUrl = (import.meta.env.VITE_STT_WS_URL || '').trim()
@@ -53,7 +54,7 @@ function looksLikeHost(value: string) {
 
 function resolveWindowHttpOrigin() {
   if (typeof window === 'undefined') {
-    return 'http://127.0.0.1:8001'
+    return `http://${defaultBackendAddress}`
   }
 
   return window.location.origin
@@ -61,7 +62,7 @@ function resolveWindowHttpOrigin() {
 
 function resolveWindowWsOrigin() {
   if (typeof window === 'undefined') {
-    return 'ws://127.0.0.1:8001'
+    return `ws://${defaultBackendAddress}`
   }
 
   return window.location.origin.replace(/^http/i, 'ws')
@@ -119,7 +120,9 @@ function normalizeWsEndpoint(value: string) {
   return ''
 }
 
-const configuredBackendBase = normalizeHttpBase(backendOrigin || legacyApiBaseUrl)
+const configuredBackendBase = normalizeHttpBase(
+  backendOrigin || legacyApiBaseUrl || defaultBackendAddress
+)
 
 function mergeHeaders(headers?: HeadersInit) {
   const nextHeaders = new Headers(headers)
