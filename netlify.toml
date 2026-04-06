@@ -3,6 +3,51 @@
   publish = "dist"
 
 [[redirects]]
+  from = "/api/*"
+  to = "http://82.156.24.217:8080/api/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/auth/*"
+  to = "http://82.156.24.217:8080/auth/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/chat/*"
+  to = "http://82.156.24.217:8080/chat/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/counseling/*"
+  to = "http://82.156.24.217:8080/counseling/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/family/*"
+  to = "http://82.156.24.217:8080/family/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/report/*"
+  to = "http://82.156.24.217:8080/report/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/elderly/me/*"
+  to = "http://82.156.24.217:8080/elderly/me/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/doctor/elderly-list"
+  to = "http://82.156.24.217:8080/doctor/elderly-list"
+  status = 200
+
+[[redirects]]
+  from = "/doctor/elderly/*"
+  to = "http://82.156.24.217:8080/doctor/elderly/:splat"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

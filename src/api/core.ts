@@ -120,9 +120,11 @@ function normalizeWsEndpoint(value: string) {
   return ''
 }
 
-const configuredBackendBase = normalizeHttpBase(
-  backendOrigin || legacyApiBaseUrl || defaultBackendAddress
-)
+const configuredBackendBase = normalizeHttpBase(backendOrigin || legacyApiBaseUrl)
+
+function shouldUseProxyFallbackForConfiguredHttpBase(value: string) {
+  return typeof window !== 'undefined' && window.location.protocol === 'https:' && /^http:\/\//i.test(value)
+}
 
 function mergeHeaders(headers?: HeadersInit) {
   const nextHeaders = new Headers(headers)
@@ -258,7 +260,11 @@ export function getNumber(record: Record<string, unknown> | null | undefined, ..
 
 export function buildBackendUrl(path: string) {
   const normalizedPath = normalizePath(path)
-  if (!configuredBackendBase) {
+  if (!configuredBackendBase || shouldUseProxyFallbackForConfiguredHttpBase(configuredBackendBase)) {
+    if (typeof window === 'undefined') {
+      return new URL(normalizedPath, ensureTrailingSlash(`http://${defaultBackendAddress}`)).toString()
+    }
+
     return normalizedPath
   }
 
@@ -276,13 +282,17 @@ export function buildWebSocketUrl(path: string) {
     return configuredSocketUrl
   }
 
-  if (configuredBackendBase) {
+  if (configuredBackendBase && !shouldUseProxyFallbackForConfiguredHttpBase(configuredBackendBase)) {
     try {
       const httpUrl = new URL(normalizedPath, ensureTrailingSlash(configuredBackendBase)).toString()
       return httpUrl.replace(/^http/i, 'ws')
     } catch {
       return `${resolveWindowWsOrigin()}${normalizedPath}`
     }
+  }
+
+  if (typeof window === 'undefined') {
+    return new URL(normalizedPath, ensureTrailingSlash(`ws://${defaultBackendAddress}`)).toString()
   }
 
   return `${resolveWindowWsOrigin()}${normalizedPath}`
