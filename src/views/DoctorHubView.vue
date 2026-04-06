@@ -33,7 +33,6 @@ const filteredRecords = computed(() => {
 
   return elderlyList.value.filter((record) => {
     const sourceText = [
-      record.name,
       record.elderly_id,
       record.overview?.summary,
       record.overview?.chronic_summary,
@@ -266,7 +265,7 @@ onMounted(async () => {
           v-model="searchQuery"
           class="search-input"
           type="search"
-          placeholder="按姓名、老人 ID、风险标签搜索"
+          placeholder="按老人 ID、风险标签或摘要搜索"
         />
 
         <div v-if="loading" class="loading-card">正在加载老人总览...</div>

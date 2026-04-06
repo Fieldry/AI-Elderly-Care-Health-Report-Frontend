@@ -51,9 +51,78 @@ const md = new MarkdownIt({
   linkify: false
 })
 
+function isLikelyBoldBoundary(line: string, index: number) {
+  if (index <= 0) {
+    return true
+  }
+
+  return /[\s([{>【「『“‘:：\-，。！？；、]/.test(line[index - 1])
+}
+
+function normalizeBrokenBoldLine(line: string) {
+  const starRuns = Array.from(line.matchAll(/\*+/g))
+  if (starRuns.length < 2) {
+    return line
+  }
+
+  let normalizedLine = line
+  let offset = 0
+
+  for (let index = 0; index < starRuns.length - 1; index += 1) {
+    const currentRun = starRuns[index]
+    const nextRun = starRuns[index + 1]
+    const currentLength = currentRun[0].length
+    const nextLength = nextRun[0].length
+
+    if (
+      !(
+        (currentLength === 1 && nextLength === 2) ||
+        (currentLength === 2 && nextLength === 1)
+      )
+    ) {
+      continue
+    }
+
+    const currentIndex = currentRun.index ?? 0
+    const nextIndex = nextRun.index ?? 0
+    if (!isLikelyBoldBoundary(line, currentIndex)) {
+      continue
+    }
+
+    const contentBetween = line.slice(
+      currentIndex + currentLength,
+      nextIndex
+    )
+    if (!contentBetween.trim() || /^\s|\s$/.test(contentBetween)) {
+      continue
+    }
+
+    if (currentLength === 1) {
+      const insertIndex = currentIndex + offset
+      normalizedLine = `${normalizedLine.slice(0, insertIndex)}*${normalizedLine.slice(insertIndex)}`
+      offset += 1
+    }
+
+    if (nextLength === 1) {
+      const insertIndex = nextIndex + offset
+      normalizedLine = `${normalizedLine.slice(0, insertIndex)}*${normalizedLine.slice(insertIndex)}`
+      offset += 1
+    }
+  }
+
+  return normalizedLine
+}
+
+function normalizeMessageMarkdown(content: string) {
+  return content
+    .split(/\r?\n/)
+    .map((line) => normalizeBrokenBoldLine(line))
+    .join('\n')
+}
+
 function renderMessageContent(content: string | undefined): string {
   if (!content) return '...'
-  return md.render(content)
+  return md.render(normalizeMessageMarkdown(content))
 }
 
 const elderlyAccessSession = ref<ElderlyAuthSession | null>(null)
