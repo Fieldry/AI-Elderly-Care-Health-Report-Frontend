@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/core'
@@ -12,6 +12,7 @@ import {
 } from '@/api/counseling'
 import { useGoogleStreamingSpeech } from '@/composables/useGoogleStreamingSpeech'
 import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
+import { useSpeechSynthesis } from '@/composables/useSpeechSynthesis'
 import {
   getStoredElderlyCounselingSessionId,
   getStoredElderlySession,
@@ -30,6 +31,7 @@ const elderlyAccessSession = ref<ElderlyAuthSession | null>(null)
 const sessions = ref<CounselingSessionInfo[]>([])
 const activeSessionId = ref('')
 const messages = ref<ChatMessage[]>([])
+const speakingMessageIndex = ref<number | null>(null)
 const inputText = ref('')
 const loading = ref(false)
 const sessionsLoading = ref(false)
@@ -69,6 +71,19 @@ const {
   onTranscript(value) {
     inputText.value = value
   }
+})
+
+// 语音输出（文本转语音）
+const {
+  speak: speakText,
+  stop: stopSpeaking,
+  isSpeaking: isTtsSpeaking,
+  isSupported: isTtsSupported,
+  errorMessage: ttsErrorMessage
+} = useSpeechSynthesis({
+  lang: 'zh-CN',
+  rate: 0.9,      // 稍慢，适合老年用户
+  preferChinese: true
 })
 
 const {
@@ -114,6 +129,12 @@ const voiceHintText = computed(() => {
   }
 
   return '点击语音输入即可说话。'
+})
+
+watch(isTtsSpeaking, (newVal) => {
+  if (!newVal) {
+    speakingMessageIndex.value = null
+  }
 })
 
 function resolvePreferredElderlySession() {
@@ -423,6 +444,21 @@ async function handleSend() {
   }
 }
 
+function handleSpeakMessage(content: string, index: number) {
+  // 如果点击的是正在播放的消息，则停止
+  if (speakingMessageIndex.value === index && isTtsSpeaking.value) {
+    stopSpeaking()
+    return
+  }
+  // 如果有其他消息正在播放，先停止
+  if (isTtsSpeaking.value) {
+    stopSpeaking()
+  }
+  // 开始播放新消息
+  speakText(content)
+  speakingMessageIndex.value = index
+}
+
 async function toggleVoiceInput() {
   if (isVoiceActive.value) {
     stopGoogleVoiceRecognition()
@@ -493,6 +529,15 @@ onMounted(async () => {
                 <span v-if="message.timestamp" class="message-bubble__time">
                   {{ formatDateTime(message.timestamp) }}
                 </span>
+                <button
+                  v-if="message.role === 'assistant' && message.content && isTtsSupported"
+                  class="speech-button"
+                  :class="{ 'speech-button--active': speakingMessageIndex === index }"
+                  :disabled="speakingMessageIndex === index && isTtsSpeaking"
+                  @click="handleSpeakMessage(message.content, index)"
+                >
+                  {{ (speakingMessageIndex === index && isTtsSpeaking) ? '⏸' : '🔊' }}
+                </button>
               </div>
               <div class="message-bubble__content">
                 {{ message.content || '...' }}
@@ -1172,5 +1217,30 @@ onMounted(async () => {
   .message-bubble--user {
     max-width: 100%;
   }
+}
+
+.speech-button {
+  background: transparent;
+  border: none;
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 20px;
+  transition: background 0.2s;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.speech-button:hover {
+  background: rgba(83, 169, 183, 0.2);
+}
+
+.speech-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.speech-button--active {
+  background: rgba(83, 169, 183, 0.3);
 }
 </style>
