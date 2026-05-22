@@ -55,7 +55,11 @@ export default defineConfig({
         target: proxyTarget,
         changeOrigin: true,
         ws: true
-      }
+      },
+      '/tts': { 
+        target: proxyTarget,
+        changeOrigin: true 
+      } 
     }
   }
 })
