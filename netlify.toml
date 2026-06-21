@@ -33,6 +33,11 @@
   status = 200
 
 [[redirects]]
+  from = "/tts/*"
+  to = "http://82.156.24.217:8080/tts/:splat"
+  status = 200
+
+[[redirects]]
   from = "/elderly/me/*"
   to = "http://82.156.24.217:8080/elderly/me/:splat"
   status = 200
