@@ -31,11 +31,60 @@ function normalizeSpeechText(text: string) {
     .trim()
 }
 
+const TTS_CHUNK_LIMIT = 180
+
+function escapeSsmlText(text: string) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+function splitSpeechText(text: string) {
+  const chunks: string[] = []
+  const sentences = text
+    .split(/(?<=[。！？；.!?;])\s*/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+  let current = ''
+  for (const sentence of sentences) {
+    if (sentence.length > TTS_CHUNK_LIMIT) {
+      if (current) {
+        chunks.push(current)
+        current = ''
+      }
+      for (let index = 0; index < sentence.length; index += TTS_CHUNK_LIMIT) {
+        chunks.push(sentence.slice(index, index + TTS_CHUNK_LIMIT))
+      }
+      continue
+    }
+
+    const next = current ? `${current}${sentence}` : sentence
+    if (next.length > TTS_CHUNK_LIMIT && current) {
+      chunks.push(current)
+      current = sentence
+    } else {
+      current = next
+    }
+  }
+
+  if (current) {
+    chunks.push(current)
+  }
+
+  return chunks.length > 0 ? chunks : [text]
+}
+
 // 调用 TTS 代理服务（如果代理失效，会降级到 Web Speech API）
-async function getAudioBlobFromTTS(text: string, endpoint: string): Promise<Blob | null> {
+async function getAudioBlobFromTTS(
+  text: string,
+  endpoint: string,
+  signal?: AbortSignal
+): Promise<Blob | null> {
   const ssml = `
     <speak version="1.0" xmlns="https://www.w3.org/2001/10/synthesis" xml:lang="zh-CN">
-      <voice name="${DEFAULT_EDGE_VOICE}">${text}</voice>
+      <voice name="${DEFAULT_EDGE_VOICE}">${escapeSsmlText(text)}</voice>
     </speak>
   `
   try {
@@ -43,10 +92,14 @@ async function getAudioBlobFromTTS(text: string, endpoint: string): Promise<Blob
       method: 'POST',
       headers: { 'Content-Type': 'application/ssml+xml' },
       body: ssml,
+      signal,
     })
     if (!response.ok) return null
     return await response.blob()
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      return null
+    }
     console.error('TTS 代理调用失败，将降级到 Web Speech API:', error)
     return null
   }
@@ -75,6 +128,9 @@ export function useSpeechSynthesis(options: UseSpeechSynthesisOptions = {}) {
   // 内部变量
   let currentUtterance: SpeechSynthesisUtterance | null = null
   let currentAudio: HTMLAudioElement | null = null   // 用于 Edge TTS 播放
+  let currentAudioUrl = ''
+  let currentAbortController: AbortController | null = null
+  let playbackVersion = 0
   let voiceLoadPromise: Promise<void> | null = null
 
   // 确保 voices 已加载（仅用于降级方案）
@@ -119,13 +175,18 @@ export function useSpeechSynthesis(options: UseSpeechSynthesisOptions = {}) {
 
   // 停止所有播放（Edge TTS + Web Speech）
   function stopSpeaking() {
+    playbackVersion += 1
+    currentAbortController?.abort()
+    currentAbortController = null
+
     // 停止 Edge TTS 音频
     if (currentAudio) {
       currentAudio.pause()
-      if (currentAudio.src) {
-        URL.revokeObjectURL(currentAudio.src)
-      }
       currentAudio = null
+    }
+    if (currentAudioUrl) {
+      URL.revokeObjectURL(currentAudioUrl)
+      currentAudioUrl = ''
     }
     // 停止 Web Speech API
     if (isSupported.value) {
@@ -174,70 +235,140 @@ export function useSpeechSynthesis(options: UseSpeechSynthesisOptions = {}) {
 
     // 停止当前正在播放的内容
     stopSpeaking()
+    const activeVersion = playbackVersion
 
     // 1. 优先尝试后端 TTS 代理，使用晓晓音色；失败后再降级浏览器语音
-    const audioBlob = ttsEndpoint ? await getAudioBlobFromTTS(normalizedText, ttsEndpoint) : null
-    if (audioBlob) {
-      const audioUrl = URL.createObjectURL(audioBlob)
-      const audio = new Audio(audioUrl)
-      currentAudio = audio
+    if (ttsEndpoint) {
       currentText.value = normalizedText
-
-      // 设置状态
-      isSpeaking.value = true
-      isPaused.value = false
-      isPending.value = false
       errorMessage.value = null
 
-      // 事件监听
-      audio.onended = () => {
-        if (currentAudio === audio) {
-          URL.revokeObjectURL(audioUrl)
-          currentAudio = null
+      const chunks = splitSpeechText(normalizedText)
+      let nextBlobPromise: Promise<Blob | null> | null = null
+
+      try {
+        for (let index = 0; index < chunks.length; index += 1) {
+          if (activeVersion !== playbackVersion) {
+            return
+          }
+
+          isPending.value = true
+          let audioBlob: Blob | null
+          if (nextBlobPromise) {
+            audioBlob = await nextBlobPromise
+          } else {
+            currentAbortController = new AbortController()
+            audioBlob = await getAudioBlobFromTTS(chunks[index], ttsEndpoint, currentAbortController.signal)
+          }
+          currentAbortController = null
+
+          if (activeVersion !== playbackVersion) {
+            return
+          }
+
+          if (!audioBlob) {
+            await speakWithWebSpeech(normalizedText, activeVersion)
+            return
+          }
+
+          if (index + 1 < chunks.length) {
+            const controller = new AbortController()
+            currentAbortController = controller
+            nextBlobPromise = getAudioBlobFromTTS(chunks[index + 1], ttsEndpoint, controller.signal)
+          } else {
+            nextBlobPromise = null
+          }
+
+          const played = await playAudioBlob(audioBlob, activeVersion)
+          if (!played) {
+            return
+          }
+        }
+
+        if (activeVersion === playbackVersion) {
           isSpeaking.value = false
           isPending.value = false
           currentText.value = ''
         }
-      }
-      audio.onerror = (err) => {
-        console.error('TTS 音频播放错误:', err)
-        URL.revokeObjectURL(audioUrl)
-        if (currentAudio === audio) {
-          currentAudio = null
+        return
+      } catch (error) {
+        if (activeVersion !== playbackVersion) {
+          return
         }
+        console.error('TTS 音频播放错误:', error)
         errorMessage.value = '语音播放失败，尝试使用浏览器内置语音'
         isSpeaking.value = false
         isPending.value = false
-        currentText.value = ''
-        // 降级：尝试 Web Speech API
-        speakWithWebSpeech(normalizedText)
+        await speakWithWebSpeech(normalizedText, activeVersion)
+        return
       }
-
-      await audio.play().catch(err => {
-        console.error('audio.play() 失败，将降级到 Web Speech API:', err)
-        URL.revokeObjectURL(audioUrl)
-        if (currentAudio === audio) {
-          currentAudio = null
-        }
-        isSpeaking.value = false
-        isPending.value = false
-        currentText.value = ''
-        return speakWithWebSpeech(normalizedText)
-      })
-      return
     }
 
     // 2. 降级方案：使用 Web Speech API
-    speakWithWebSpeech(normalizedText)
+    await speakWithWebSpeech(normalizedText, activeVersion)
   }
 
-  async function speakWithWebSpeech(text: string) {
+  function playAudioBlob(audioBlob: Blob, activeVersion: number) {
+    return new Promise<boolean>((resolve, reject) => {
+      if (activeVersion !== playbackVersion) {
+        resolve(false)
+        return
+      }
+
+      if (currentAudioUrl) {
+        URL.revokeObjectURL(currentAudioUrl)
+      }
+      const audioUrl = URL.createObjectURL(audioBlob)
+      currentAudioUrl = audioUrl
+      const audio = new Audio(audioUrl)
+      currentAudio = audio
+
+      const cleanup = () => {
+        if (currentAudio === audio) {
+          currentAudio = null
+        }
+        if (currentAudioUrl === audioUrl) {
+          URL.revokeObjectURL(audioUrl)
+          currentAudioUrl = ''
+        }
+      }
+
+      audio.onended = () => {
+        cleanup()
+        if (activeVersion === playbackVersion) {
+          isSpeaking.value = false
+          isPending.value = false
+        }
+        resolve(activeVersion === playbackVersion)
+      }
+      audio.onerror = (error) => {
+        cleanup()
+        reject(error)
+      }
+      audio.onpause = () => {
+        cleanup()
+        resolve(false)
+      }
+
+      isSpeaking.value = true
+      isPaused.value = false
+      isPending.value = false
+      audio.play().catch((error) => {
+        cleanup()
+        reject(error)
+      })
+    })
+  }
+
+  async function speakWithWebSpeech(text: string, activeVersion = playbackVersion) {
     if (!isSupported.value) {
       errorMessage.value = '当前浏览器不支持语音合成'
       throw new Error(errorMessage.value)
     }
 
     await ensureVoicesLoaded()
+    if (activeVersion !== playbackVersion) {
+      return
+    }
 
     const utterance = new SpeechSynthesisUtterance(text)
     currentUtterance = utterance

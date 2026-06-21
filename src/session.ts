@@ -21,6 +21,7 @@ interface ElderlySessionSnapshot {
   sessionId: string
   userId: string
   metadata: SessionMetadata
+  accessSession?: ElderlyAuthSession
   messages: ChatMessage[]
   profile?: Record<string, unknown>
   reports?: Array<Record<string, unknown>>
@@ -246,6 +247,7 @@ function normalizeElderlySessionSnapshot(raw: unknown): ElderlySessionSnapshot |
   const sessionId = typeof record.sessionId === 'string' ? record.sessionId : ''
   const userId = typeof record.userId === 'string' ? record.userId : ''
   const metadata = normalizeSessionMetadata(record.metadata)
+  const accessSession = normalizeSession(record.accessSession)
 
   if (!sessionId || !userId || !metadata) {
     return null
@@ -255,6 +257,7 @@ function normalizeElderlySessionSnapshot(raw: unknown): ElderlySessionSnapshot |
     sessionId,
     userId,
     metadata,
+    accessSession: accessSession?.role === 'elderly' ? accessSession : undefined,
     messages: Array.isArray(record.messages)
       ? record.messages.map(normalizeChatMessage).filter(Boolean) as ChatMessage[]
       : [],

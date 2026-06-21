@@ -255,6 +255,7 @@ const openingSessionReportId = ref('')
 const largeTextMode = ref(false)
 const speakingMessageIndex = ref<number | null>(null)
 const promptedInteractionMessageId = ref('')
+const interactionMissingFields = ref<string[]>([])
 
 const chatBodyRef = ref<HTMLElement | null>(null)
 const interactionModalTimer = ref<ReturnType<typeof setTimeout> | null>(null)
@@ -318,6 +319,24 @@ const selectedReportPointSections = computed(() => {
 
   return []
 })
+const selectedReportSpeechText = computed(() => {
+  const normalizedReport = selectedReportView.value
+  if (!normalizedReport) {
+    return ''
+  }
+
+  const parts = ['健康评估与照护行动计划']
+  if (normalizedReport.summary) {
+    parts.push(`摘要：${normalizedReport.summary}`)
+  }
+
+  for (const section of selectedReportPointSections.value) {
+    parts.push(section.title)
+    parts.push(...section.items)
+  }
+
+  return normalizeWelcomeSpeechText(parts.join('。'))
+})
 const elderlyUserId = computed(() => elderlyAccessSession.value?.userId || '')
 const elderlyBindCode = computed(() => elderlyAccessSession.value?.bindCode || '')
 const progressPercentLabel = computed(() =>
@@ -346,6 +365,8 @@ const CARD_INTERACTION_NOTICE =
 const CONFIRM_INTERACTION_NOTICE =
   '信息已经收集得差不多了。请点击下方按钮打开确认卡片，确认无误后就可以生成报告。'
 const SKIP_VALUE = '__SKIPPED__'
+const INTERACTION_SPEECH_INDEX = -1
+const REPORT_SPEECH_INDEX = -2
 const inputPlaceholder = computed(() =>
   sending.value
     ? '正在发送，请稍候。'
@@ -401,12 +422,16 @@ const {
   speak: speakText,
   stop: stopSpeaking,
   isSpeaking: isTtsSpeaking,
+  isPending: isTtsPending,
   isSupported: isTtsSupported
 } = useSpeechSynthesis({
   lang: 'zh-CN',
   rate: 0.9,
   preferChinese: true
 })
+const isReportAudioActive = computed(
+  () => speakingMessageIndex.value === REPORT_SPEECH_INDEX && (isTtsSpeaking.value || isTtsPending.value)
+)
 
 const {
   isListening: isBrowserVoiceListening,
@@ -453,8 +478,8 @@ const voiceHintText = computed(() => {
   return '点击语音输入即可说话。'
 })
 
-watch(isTtsSpeaking, (newVal) => {
-  if (!newVal) {
+watch([isTtsSpeaking, isTtsPending], ([speaking, pending]) => {
+  if (!speaking && !pending) {
     speakingMessageIndex.value = null
   }
 })
@@ -464,6 +489,8 @@ function cloneJson<T>(value: T) {
 }
 
 function resetInteractionValues(interaction: ChatInteraction | null) {
+  interactionMissingFields.value = []
+
   if (!interaction) {
     interactionValues.value = {}
     return
@@ -517,6 +544,7 @@ function setInteractionFieldValue(key: string, value: string) {
     ...interactionValues.value,
     [key]: value
   }
+  interactionMissingFields.value = interactionMissingFields.value.filter((item) => item !== key)
 }
 
 function toggleInteractionMultiSelect(key: string) {
@@ -534,6 +562,103 @@ function toggleInteractionMultiSelect(key: string) {
   }
 }
 
+function isInteractionFieldMissing(key: string | undefined) {
+  return Boolean(key && interactionMissingFields.value.includes(key))
+}
+
+function getInteractionMissingLabels(interaction: ChatInteraction) {
+  if (interaction.kind === 'single_choice' && interaction.field) {
+    return getInteractionFieldValue(interaction.field)
+      ? []
+      : [{ key: interaction.field, label: interaction.prompt || '当前题目' }]
+  }
+
+  if (interaction.kind === 'matrix_single_choice') {
+    return interactionItems.value
+      .filter((item) => !getInteractionFieldValue(item.key))
+      .map((item) => ({ key: item.key, label: item.label }))
+  }
+
+  if (interaction.kind === 'form_card') {
+    return interactionFields.value
+      .filter((field) => !getInteractionFieldValue(field.key))
+      .map((field) => ({ key: field.key, label: field.label }))
+  }
+
+  return []
+}
+
+function setMissingInteractionFields(missing: Array<{ key: string; label: string }>) {
+  interactionMissingFields.value = missing.map((item) => item.key)
+  errorMessage.value = ''
+}
+
+function buildInteractionSubmitValues(interaction: ChatInteraction) {
+  if (interaction.kind === 'single_choice' && interaction.field) {
+    return { [interaction.field]: getInteractionFieldValue(interaction.field) }
+  }
+
+  if (interaction.kind === 'matrix_single_choice') {
+    return Object.fromEntries(
+      interactionItems.value.map((item) => [item.key, getInteractionFieldValue(item.key)])
+    )
+  }
+
+  if (interaction.kind === 'multi_select') {
+    const selected = Array.isArray(interactionValues.value.selected)
+      ? interactionValues.value.selected.map((item) => String(item))
+      : []
+    return { selected }
+  }
+
+  if (interaction.kind === 'form_card') {
+    const values: Record<string, unknown> = {}
+    for (const field of interactionFields.value) {
+      values[field.key] = getInteractionFieldValue(field.key)
+      if (field.custom_key) {
+        values[field.custom_key] = getInteractionFieldValue(field.custom_key)
+      }
+    }
+    return values
+  }
+
+  return {}
+}
+
+function buildInteractionSkipValues(interaction: ChatInteraction) {
+  if (interaction.kind === 'single_choice' && interaction.field) {
+    const value = getInteractionFieldValue(interaction.field)
+    return { [interaction.field]: value || SKIP_VALUE }
+  }
+
+  if (interaction.kind === 'matrix_single_choice') {
+    return Object.fromEntries(
+      interactionItems.value.map((item) => [item.key, getInteractionFieldValue(item.key) || SKIP_VALUE])
+    )
+  }
+
+  if (interaction.kind === 'multi_select') {
+    const selected = Array.isArray(interactionValues.value.selected)
+      ? interactionValues.value.selected.map((item) => String(item))
+      : []
+    return { selected: selected.length > 0 ? selected : SKIP_VALUE }
+  }
+
+  if (interaction.kind === 'form_card') {
+    const values: Record<string, unknown> = {}
+    for (const field of interactionFields.value) {
+      const value = getInteractionFieldValue(field.key)
+      values[field.key] = value || SKIP_VALUE
+      if (field.custom_key && value) {
+        values[field.custom_key] = getInteractionFieldValue(field.custom_key)
+      }
+    }
+    return values
+  }
+
+  return {}
+}
+
 function describeInteractionAnswer(interaction: ChatInteraction, values: Record<string, unknown>): string {
   if (interaction.kind === 'single_choice' && interaction.field) {
     const answer = getStringValue(values[interaction.field])
@@ -548,7 +673,10 @@ function describeInteractionAnswer(interaction: ChatInteraction, values: Record<
       return `跳过：${interaction.prompt}`
     }
     return (interaction.items || [])
-      .map((item) => `${item.label}：${getStringValue(values[item.key])}`)
+      .map((item) => {
+        const value = getStringValue(values[item.key])
+        return value === SKIP_VALUE ? `${item.label}：跳过` : `${item.label}：${value}`
+      })
       .filter((item) => item.replace(/：$/, '') !== '')
       .join('；')
   }
@@ -571,6 +699,9 @@ function describeInteractionAnswer(interaction: ChatInteraction, values: Record<
     return interactionFields.value
       .map((field) => {
         const value = getStringValue(values[field.key])
+        if (value === SKIP_VALUE) {
+          return `${field.label}：跳过`
+        }
         return value ? `${field.label}：${value}` : ''
       })
       .filter(Boolean)
@@ -711,17 +842,13 @@ function upsertSessionMetadata(metadata: SessionMetadata) {
   sessions.value = sortSessionsByCreatedAt(dedupeSessions([metadata, ...sessions.value]))
 }
 
-function getLocalSessionMetadata(userId = elderlyUserId.value) {
-  if (!userId) {
-    return [] as SessionMetadata[]
-  }
-
+function getLocalSessionMetadata(userId?: string) {
   return sortSessionsByCreatedAt(
     dedupeSessions(getStoredElderlySessionSnapshots(userId).map((snapshot) => snapshot.metadata))
   )
 }
 
-function hydrateSessionsFromLocal(userId = elderlyUserId.value) {
+function hydrateSessionsFromLocal(userId?: string) {
   const localSessions = getLocalSessionMetadata(userId)
   sessions.value = localSessions
   return localSessions
@@ -779,6 +906,7 @@ function persistCurrentSnapshot(metadata = resolveSnapshotMetadata()) {
     sessionId: sessionId.value,
     userId: elderlyUserId.value,
     metadata,
+    accessSession: elderlyAccessSession.value ? cloneJson(elderlyAccessSession.value) : undefined,
     messages: messages.value.map((message) => ({ ...message })),
     profile: Object.keys(profile.value || {}).length > 0 ? cloneJson(profile.value) : undefined,
     reports: cloneJson(reports.value),
@@ -836,6 +964,10 @@ function applyStoredSessionSnapshot(targetSessionId: string, message: string) {
     return false
   }
 
+  if (snapshot.accessSession) {
+    updateActiveElderlySession(snapshot.accessSession)
+    setStoredSession(snapshot.accessSession)
+  }
   updateCurrentSessionId(snapshot.sessionId)
   messages.value = snapshot.messages.map((entry) => ({ ...entry }))
   profile.value = cloneJson(snapshot.profile || {})
@@ -913,6 +1045,9 @@ function openInteractionModal() {
     return
   }
 
+  if (isTtsSpeaking.value || isTtsPending.value) {
+    stopSpeaking()
+  }
   interactionLaunchRequested.value = true
   interactionModalVisible.value = true
   appendInteractionPromptMessage()
@@ -924,13 +1059,18 @@ function speakInteractionPrompt() {
     return
   }
 
-  if (isTtsSpeaking.value) {
+  if (speakingMessageIndex.value === INTERACTION_SPEECH_INDEX && (isTtsSpeaking.value || isTtsPending.value)) {
+    stopSpeaking()
+    return
+  }
+
+  if (isTtsSpeaking.value || isTtsPending.value) {
     stopSpeaking()
   }
 
-  speakingMessageIndex.value = -1
+  speakingMessageIndex.value = INTERACTION_SPEECH_INDEX
   void speakText(promptText).catch(() => {
-    if (speakingMessageIndex.value === -1) {
+    if (speakingMessageIndex.value === INTERACTION_SPEECH_INDEX) {
       speakingMessageIndex.value = null
     }
   })
@@ -939,6 +1079,7 @@ function speakInteractionPrompt() {
 function dismissInteractionModal() {
   interactionLaunchRequested.value = false
   interactionModalVisible.value = false
+  interactionMissingFields.value = []
 }
 
 function toggleLargeTextMode() {
@@ -1054,7 +1195,7 @@ function applyStartedSession(response: ChatStartResponse) {
     userId: response.userId,
     sessionId: response.sessionId,
     userType: response.userType,
-    bindCode: response.bindCode
+    bindCode: normalizeBindCodeFromPayload(response)
   } satisfies ElderlyAuthSession
 
   updateActiveElderlySession(nextSession)
@@ -1089,7 +1230,14 @@ function resetSelectedReport() {
 }
 
 function closeReportModal() {
+  if (isReportAudioActive.value) {
+    stopSpeaking()
+  }
   resetSelectedReport()
+}
+
+function handleSpeakReport() {
+  handleSpeakMessage(selectedReportSpeechText.value, REPORT_SPEECH_INDEX)
 }
 
 async function refreshSessions(token: string) {
@@ -1173,12 +1321,19 @@ async function loadExistingSession(targetSessionId: string, token: string) {
   stopSpeaking()
 
   try {
+    const localSnapshot = getStoredElderlySessionSnapshot(targetSessionId)
+    const effectiveToken = localSnapshot?.accessSession?.token || token
+    if (localSnapshot?.accessSession) {
+      updateActiveElderlySession(localSnapshot.accessSession)
+      setStoredSession(localSnapshot.accessSession)
+    }
+
     updateCurrentSessionId(targetSessionId)
-    const detail = await getSessionDetail(targetSessionId, token)
+    const detail = await getSessionDetail(targetSessionId, effectiveToken)
     const conversation =
       detail.conversation && detail.conversation.length > 0
         ? detail.conversation
-        : await getChatHistory(targetSessionId, token)
+        : await getChatHistory(targetSessionId, effectiveToken)
 
     const detailMetadata =
       detail.metadata?.session_id && (detail.metadata.user_id || detail.metadata.userId)
@@ -1201,9 +1356,9 @@ async function loadExistingSession(targetSessionId: string, token: string) {
     persistCurrentSnapshot(resolveSnapshotMetadata(targetSessionId))
 
     await Promise.allSettled([
-      refreshProgressState(targetSessionId, token).catch(() => {}),
-      refreshSessionArtifacts(targetSessionId, token),
-      refreshSessions(token)
+      refreshProgressState(targetSessionId, effectiveToken).catch(() => {}),
+      refreshSessionArtifacts(targetSessionId, effectiveToken),
+      refreshSessions(effectiveToken)
     ])
     persistCurrentSnapshot(resolveSnapshotMetadata(targetSessionId))
     return detail
@@ -1227,6 +1382,7 @@ async function createNewSession() {
   resetSelectedReport()
 
   try {
+    persistCurrentSnapshot()
     const response = await startChat()
     applyStartedSession(response)
     updateCurrentSessionId(response.sessionId)
@@ -1282,7 +1438,7 @@ async function initializeAssessment() {
   if (session.value?.role !== 'elderly') {
     setStoredSession(preferredSession)
   }
-  hydrateSessionsFromLocal(preferredSession.userId)
+  hydrateSessionsFromLocal()
 
   try {
     const availableSessions = await refreshSessions(preferredSession.token)
@@ -1296,7 +1452,7 @@ async function initializeAssessment() {
       return
     }
 
-    const localSessions = hydrateSessionsFromLocal(preferredSession.userId)
+    const localSessions = hydrateSessionsFromLocal()
     const localTargetSessionId =
       resolveInitialSessionId(preferredSession, localSessions) || localSessions[0]?.session_id || ''
 
@@ -1471,7 +1627,7 @@ function autoSpeakAssistantMessage(content: string, index: number) {
     return
   }
 
-  if (isTtsSpeaking.value) {
+  if (isTtsSpeaking.value || isTtsPending.value) {
     stopSpeaking()
   }
 
@@ -1489,12 +1645,12 @@ function handleSpeakMessage(content: string, index: number) {
     return
   }
 
-  if (speakingMessageIndex.value === index && isTtsSpeaking.value) {
+  if (isSpeechIndexActive(index)) {
     stopSpeaking()
     return
   }
 
-  if (isTtsSpeaking.value) {
+  if (isTtsSpeaking.value || isTtsPending.value) {
     stopSpeaking()
   }
 
@@ -1504,6 +1660,10 @@ function handleSpeakMessage(content: string, index: number) {
       speakingMessageIndex.value = null
     }
   })
+}
+
+function isSpeechIndexActive(index: number) {
+  return speakingMessageIndex.value === index && (isTtsSpeaking.value || isTtsPending.value)
 }
 
 function isInteractionValueSelected(key: string, value: string) {
@@ -1518,53 +1678,14 @@ async function handleCurrentInteractionSubmit() {
   errorMessage.value = ''
   const interaction = currentInteraction.value
 
-  if (interaction.kind === 'single_choice' && interaction.field) {
-    const value = getInteractionFieldValue(interaction.field)
-    if (!value) {
-      errorMessage.value = '请先选择一个答案。'
-      return
-    }
-    await submitStructuredInteraction({ [interaction.field]: value })
+  const missing = getInteractionMissingLabels(interaction)
+  if (missing.length > 0) {
+    setMissingInteractionFields(missing)
     return
   }
 
-  if (interaction.kind === 'matrix_single_choice') {
-    const values: Record<string, unknown> = {}
-    for (const item of interactionItems.value) {
-      const value = getInteractionFieldValue(item.key)
-      if (!value) {
-        errorMessage.value = `请先完成“${item.label}”这一项。`
-        return
-      }
-      values[item.key] = value
-    }
-    await submitStructuredInteraction(values)
-    return
-  }
-
-  if (interaction.kind === 'multi_select') {
-    const selected = Array.isArray(interactionValues.value.selected)
-      ? interactionValues.value.selected.map((item) => String(item))
-      : []
-    await submitStructuredInteraction({ selected })
-    return
-  }
-
-  if (interaction.kind === 'form_card') {
-    const values: Record<string, unknown> = {}
-    for (const field of interactionFields.value) {
-      const fieldValue = getInteractionFieldValue(field.key)
-      if (!fieldValue) {
-        errorMessage.value = `请先填写“${field.label}”。`
-        return
-      }
-      values[field.key] = fieldValue
-      if (field.custom_key) {
-        values[field.custom_key] = getInteractionFieldValue(field.custom_key)
-      }
-    }
-    await submitStructuredInteraction(values)
-  }
+  interactionMissingFields.value = []
+  await submitStructuredInteraction(buildInteractionSubmitValues(interaction))
 }
 
 async function handleSkipInteraction() {
@@ -1574,27 +1695,17 @@ async function handleSkipInteraction() {
 
   errorMessage.value = ''
   const interaction = currentInteraction.value
-
-  if (interaction.kind === 'single_choice' && interaction.field) {
-    await submitStructuredInteraction({ [interaction.field]: SKIP_VALUE })
+  const missing = getInteractionMissingLabels(interaction)
+  const confirmMessage = missing.length > 0
+    ? `确定跳过未完成的项目吗？已选择的内容会正常提交，未选择的 ${missing.map((item) => `“${item.label}”`).join('、')} 会标记为空缺。`
+    : '确定跳过当前题卡吗？'
+  const confirmed = window.confirm(confirmMessage)
+  if (!confirmed) {
     return
   }
 
-  if (interaction.kind === 'matrix_single_choice') {
-    const values = Object.fromEntries(interactionItems.value.map((item) => [item.key, SKIP_VALUE]))
-    await submitStructuredInteraction(values)
-    return
-  }
-
-  if (interaction.kind === 'multi_select') {
-    await submitStructuredInteraction({ selected: SKIP_VALUE })
-    return
-  }
-
-  if (interaction.kind === 'form_card') {
-    const values = Object.fromEntries(interactionFields.value.map((field) => [field.key, SKIP_VALUE]))
-    await submitStructuredInteraction(values)
-  }
+  interactionMissingFields.value = []
+  await submitStructuredInteraction(buildInteractionSkipValues(interaction))
 }
 
 async function handleConfirmReportGeneration() {
@@ -1898,12 +2009,12 @@ onBeforeRouteLeave(() => {
                 <button
                   v-if="message.role === 'assistant' && message.content && isTtsSupported"
                   class="speech-button"
-                  :class="{ 'speech-button--active': speakingMessageIndex === index && isTtsSpeaking }"
+                  :class="{ 'speech-button--active': isSpeechIndexActive(index) }"
                   type="button"
-                  :aria-label="speakingMessageIndex === index && isTtsSpeaking ? '停止朗读' : '朗读这条回复'"
+                  :aria-label="isSpeechIndexActive(index) ? '停止朗读' : '朗读这条回复'"
                   @click="handleSpeakMessage(message.content, index)"
                 >
-                  {{ speakingMessageIndex === index && isTtsSpeaking ? '停止' : '朗读' }}
+                  {{ isSpeechIndexActive(index) ? '停止' : '朗读' }}
                 </button>
               </div>
               <div class="message-bubble__content markdown-body" v-html="renderMessageContent(message.content)"></div>
@@ -1928,15 +2039,15 @@ onBeforeRouteLeave(() => {
           <div class="composer-shell">
             <template v-if="generatingReport">
               <div class="composer-shell__header">
-                <label class="composer-label">智能体正在思考</label>
+                <label class="composer-label">评估进行中</label>
               </div>
               <div class="composer-disabled">
                 <p class="composer-disabled__title">
                   <span class="generating-spinner" />
-                  智能体正在思考
+                  评估进行中
                 </p>
                 <p class="composer-disabled__text">
-                  请您稍等4-5分钟，智能体正在思考中......
+                  请您稍等4-5分钟，我们正在为您准备评估报告
                 </p>
                 <p class="composer-disabled__text composer-disabled__steps">
                   正在进行：失能状态判定 → 风险预测 → 健康画像 → 行动计划 → 报告生成
@@ -2064,6 +2175,11 @@ onBeforeRouteLeave(() => {
               :key="item.session_id"
               class="session-item"
               :class="{ 'is-active': item.session_id === sessionId }"
+              role="button"
+              tabindex="0"
+              @click="switchSession(item.session_id)"
+              @keydown.enter.prevent="switchSession(item.session_id)"
+              @keydown.space.prevent="switchSession(item.session_id)"
             >
               <div class="session-item__head">
                 <div class="session-item__copy">
@@ -2084,7 +2200,7 @@ onBeforeRouteLeave(() => {
                   class="ghost-button session-item__action"
                   type="button"
                   :disabled="openingSessionReportId === item.session_id"
-                  @click="handleOpenSessionReport(item)"
+                  @click.stop="handleOpenSessionReport(item)"
                 >
                   {{ openingSessionReportId === item.session_id ? '打开中...' : '查看报告' }}
                 </button>
@@ -2119,30 +2235,38 @@ onBeforeRouteLeave(() => {
               <p class="interaction-card__prompt interaction-modal__prompt">{{ currentInteraction.prompt }}</p>
               <button
                 class="speech-button speech-button--inline"
-                :class="{ 'speech-button--active': speakingMessageIndex === -1 && isTtsSpeaking }"
+                :class="{ 'speech-button--active': isSpeechIndexActive(INTERACTION_SPEECH_INDEX) }"
                 type="button"
-                :aria-label="speakingMessageIndex === -1 && isTtsSpeaking ? '停止朗读题目' : '朗读题目'"
+                :aria-label="isSpeechIndexActive(INTERACTION_SPEECH_INDEX) ? '停止朗读题目' : '朗读题目'"
                 @click="speakInteractionPrompt"
               >
-                {{ speakingMessageIndex === -1 && isTtsSpeaking ? '停止' : '朗读' }}
+                {{ isSpeechIndexActive(INTERACTION_SPEECH_INDEX) ? '停止' : '朗读' }}
               </button>
             </div>
             <p v-if="shouldShowInteractionScrollHint(currentInteraction)" class="interaction-card__scroll-hint">
               您可以上下滑动查看所有问题
             </p>
 
-            <div v-if="currentInteraction.kind === 'single_choice' && currentInteraction.field" class="choice-grid">
-              <button
-                v-for="option in interactionOptions"
-                :key="option.value"
-                class="choice-chip"
-                :class="{ 'is-selected': isInteractionValueSelected(currentInteraction.field, option.value) }"
-                type="button"
-                @click="setInteractionFieldValue(currentInteraction.field, option.value)"
+            <template v-if="currentInteraction.kind === 'single_choice' && currentInteraction.field">
+              <div class="choice-grid">
+                <button
+                  v-for="option in interactionOptions"
+                  :key="option.value"
+                  class="choice-chip"
+                  :class="{ 'is-selected': isInteractionValueSelected(currentInteraction.field, option.value) }"
+                  type="button"
+                  @click="setInteractionFieldValue(currentInteraction.field, option.value)"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
+              <p
+                v-if="isInteractionFieldMissing(currentInteraction.field)"
+                class="interaction-card__error"
               >
-                {{ option.label }}
-              </button>
-            </div>
+                请先选择这一项。
+              </p>
+            </template>
 
             <div v-else-if="currentInteraction.kind === 'matrix_single_choice'" class="matrix-card">
               <div v-for="item in interactionItems" :key="item.key" class="matrix-row">
@@ -2159,6 +2283,9 @@ onBeforeRouteLeave(() => {
                     {{ option.label }}
                   </button>
                 </div>
+                <p v-if="isInteractionFieldMissing(item.key)" class="interaction-card__error">
+                  请先选择“{{ item.label }}”。
+                </p>
               </div>
             </div>
 
@@ -2190,6 +2317,9 @@ onBeforeRouteLeave(() => {
                     {{ option.label }}
                   </button>
                 </div>
+                <p v-if="isInteractionFieldMissing(field.key)" class="interaction-card__error">
+                  请先选择“{{ field.label }}”。
+                </p>
                 <input
                   v-if="field.custom_key && getInteractionFieldValue(field.key) === '其他'"
                   class="composer-input"
@@ -2217,7 +2347,15 @@ onBeforeRouteLeave(() => {
               class="composer-actions composer-actions--card"
             >
               <button
-                class="secondary-button composer-submit"
+                class="primary-button composer-submit"
+                type="button"
+                :disabled="loading || sending"
+                @click="handleCurrentInteractionSubmit"
+              >
+                {{ sending ? '提交中...' : (currentInteraction.submitLabel || '提交答案') }}
+              </button>
+              <button
+                class="secondary-button composer-submit composer-submit--light"
                 type="button"
                 :disabled="sending"
                 @click="dismissInteractionModal"
@@ -2225,20 +2363,12 @@ onBeforeRouteLeave(() => {
                 取消
               </button>
               <button
-                class="secondary-button composer-submit"
+                class="ghost-button composer-submit composer-submit--light"
                 type="button"
                 :disabled="loading || sending"
                 @click="handleSkipInteraction"
               >
                 跳过
-              </button>
-              <button
-                class="primary-button composer-submit"
-                type="button"
-                :disabled="loading || sending"
-                @click="handleCurrentInteractionSubmit"
-              >
-                {{ sending ? '提交中...' : (currentInteraction.submitLabel || '提交答案') }}
               </button>
             </div>
           </div>
@@ -2251,13 +2381,21 @@ onBeforeRouteLeave(() => {
         <header class="report-modal__header">
           <div>
             <p class="eyebrow">报告详情</p>
-            <h3>{{ selectedReportId }}</h3>
+            <h3>健康评估与照护行动计划</h3>
             <p>
               {{ selectedReportLoading ? '正在同步当前报告内容' : formatDateTime(selectedReportView?.generatedAt || '') }}
             </p>
           </div>
 
           <div class="report-modal__actions">
+            <button
+              class="secondary-button report-modal__action"
+              type="button"
+              :disabled="selectedReportLoading || !selectedReportSpeechText"
+              @click="handleSpeakReport"
+            >
+              {{ isReportAudioActive ? '停止朗读' : '朗读报告' }}
+            </button>
             <button
               class="ghost-button report-modal__action"
               type="button"
@@ -2776,6 +2914,14 @@ onBeforeRouteLeave(() => {
   line-height: 1.6;
 }
 
+.interaction-card__error {
+  margin: 6px 0 0;
+  color: #c43d3d;
+  font-size: 0.95rem;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
 .choice-grid {
   display: flex;
   flex-wrap: wrap;
@@ -3246,7 +3392,7 @@ onBeforeRouteLeave(() => {
 }
 
 .report-modal__card {
-  width: min(760px, calc(100vw - 32px));
+  width: min(860px, calc(100vw - 32px));
   max-height: min(80vh, 920px);
   padding: 24px;
   overflow: hidden;
@@ -3268,7 +3414,8 @@ onBeforeRouteLeave(() => {
 .report-modal__header h3 {
   margin: 10px 0 0;
   color: var(--ink-strong);
-  font-size: clamp(1.55rem, 2.3vw, 2rem);
+  font-size: clamp(1.42rem, 2vw, 1.9rem);
+  white-space: nowrap;
 }
 
 .report-modal__header p:last-child {
@@ -3899,6 +4046,9 @@ onBeforeRouteLeave(() => {
 @media (max-width: 1100px) {
   .assessment-layout {
     grid-template-columns: 1fr;
+    min-height: calc(100vh - 122px);
+    height: auto;
+    overflow: visible;
   }
 
   .chat-card {
@@ -3909,6 +4059,88 @@ onBeforeRouteLeave(() => {
   .side-panel {
     padding-left: 0;
     border-left: 0;
+    height: auto;
+    overflow: visible;
+  }
+}
+
+.message-bubble--user .message-bubble__content,
+.message-bubble--user .message-bubble__content.markdown-body :deep(*),
+.message-bubble--user .message-bubble__content.markdown-body :deep(p:last-child),
+.message-bubble--user .message-bubble__content.markdown-body :deep(h4:last-child) {
+  color: #fff !important;
+}
+
+.session-item {
+  cursor: pointer;
+}
+
+.session-item:focus-visible {
+  outline: 3px solid rgba(36, 127, 218, 0.36);
+  outline-offset: 3px;
+}
+
+.interaction-modal,
+.report-modal {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  align-items: flex-start;
+  padding: clamp(12px, 3vh, 28px);
+}
+
+.interaction-modal__card,
+.report-modal__card {
+  max-height: calc(100dvh - clamp(24px, 6vh, 56px));
+  min-height: 0;
+}
+
+.interaction-modal__body,
+.report-modal__body {
+  min-height: 0;
+}
+
+.interaction-modal .composer-actions--card {
+  gap: 10px;
+}
+
+.interaction-modal .composer-submit--light {
+  background: #f4fafb;
+  border: 1px solid rgba(185, 202, 213, 0.8);
+  color: #627482;
+  box-shadow: none;
+}
+
+.interaction-modal .composer-submit--light:hover {
+  background: #fff;
+  border-color: rgba(83, 169, 183, 0.26);
+  color: #2b8696;
+}
+
+.interaction-modal .interaction-card__error {
+  color: #c43d3d;
+}
+
+@media (max-width: 720px) {
+  .interaction-modal .composer-actions--card {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .interaction-modal .composer-submit,
+  .report-modal__action {
+    width: 100%;
+  }
+}
+
+@media (max-height: 720px) {
+  .interaction-modal__card,
+  .report-modal__card {
+    padding: 18px;
+  }
+
+  .interaction-modal__header h3,
+  .report-modal__header h3 {
+    font-size: 1.5rem;
   }
 }
 </style>
