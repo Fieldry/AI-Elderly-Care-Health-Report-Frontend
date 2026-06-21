@@ -422,7 +422,7 @@ async function saveProfile() {
   try {
     const payload = serializeProfilePayload(profileForm)
     await updateFamilyElderly(props.elderlyId, session.value.token, payload)
-    successMessage.value = '画像信息已保存。'
+    successMessage.value = '信息已保存。'
     await Promise.all([loadProfileDetail(), loadReports()])
   } catch (error) {
     errorMessage.value =
@@ -631,7 +631,7 @@ watch(
           <div class="detail-form-card__actions">
             <button class="secondary-button" type="button" @click="router.push('/family/hub')">返回列表</button>
             <button class="primary-button" type="button" :disabled="loading || saving" @click="saveProfile">
-              {{ saving ? '保存中...' : '保存图像' }}
+              {{ saving ? '保存中...' : '保存信息' }}
             </button>
             <button class="ghost-button" type="button" :disabled="generatingReport" @click="handleGenerateReport">
               {{ generatingReport ? '生成中...' : '生成报告' }}
