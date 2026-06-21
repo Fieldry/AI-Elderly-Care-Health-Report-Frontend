@@ -7,6 +7,7 @@ export interface AuthResponse {
   expires_at?: string
   family_id?: string
   elderly_ids?: string[]
+  bind_code?: string
 }
 
 export interface FamilyRegisterPayload {
@@ -35,6 +36,7 @@ export interface ElderlyAuthSession extends BaseAuthSession {
   userId: string
   sessionId: string
   userType?: string
+  bindCode?: string
 }
 
 export interface FamilyAuthSession extends BaseAuthSession {
@@ -55,6 +57,7 @@ export interface ChatStartResponse {
   welcomeMessage: string
   interaction?: ChatInteraction | null
   accessToken: string
+  bindCode?: string
   userType?: string
   expiresAt?: string
 }

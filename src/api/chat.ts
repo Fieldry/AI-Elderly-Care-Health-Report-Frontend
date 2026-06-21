@@ -275,6 +275,7 @@ export async function startChat() {
     welcomeMessage: getString(record, 'welcomeMessage', 'welcome_message') || '',
     interaction: normalizeChatInteraction(record.interaction),
     accessToken: getString(record, 'accessToken', 'access_token') || '',
+    bindCode: getString(record, 'bindCode', 'bind_code') || undefined,
     userType: getString(record, 'userType', 'user_type') || undefined,
     expiresAt: getString(record, 'expiresAt', 'expires_at') || undefined
   } satisfies ChatStartResponse

@@ -18,7 +18,7 @@ export function registerFamilyAccount(payload: FamilyRegisterPayload) {
 }
 
 export function bindFamilyElderly(token: string, payload: FamilyBindPayload) {
-  return requestJson<{ success?: boolean; elderly_ids?: string[] }>('/auth/family/bind', {
+  return requestJson<{ success?: boolean; elderly_id?: string; elderly_ids?: string[] }>('/auth/family/bind', {
     method: 'POST',
     headers: buildJsonHeaders(buildAuthHeaders(token)),
     body: JSON.stringify(payload)

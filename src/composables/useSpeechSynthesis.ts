@@ -10,20 +10,36 @@ export interface UseSpeechSynthesisOptions {
   pitch?: number
   /** 默认音量，范围 0 ~ 1，默认 1 */
   volume?: number
+  /** 优先选择中文语音作为浏览器降级朗读音色 */
+  preferChinese?: boolean
+  /** 可选的高质量 TTS 代理地址；不配置时直接使用浏览器内置朗读 */
+  ttsEndpoint?: string
 }
 
 // 固定的高质量女声音色（Edge TTS 晓晓）
 const DEFAULT_EDGE_VOICE = 'zh-CN-XiaoxiaoNeural'
 
-// 调用 Edge TTS 代理服务（如果代理失效，可替换为自己的服务端接口）
-async function getAudioBlobFromEdgeTTS(text: string): Promise<Blob | null> {
+function normalizeSpeechText(text: string) {
+  return (text || '')
+    .replace(/^\s*#{1,6}\s*/gm, '')
+    .replace(/^\s*(?:[-*+]|>\s*|\d+[.)])\s*/gm, '')
+    .replace(/\r?\n+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/[#*_`~]+/g, '')
+    .replace(/[（(【\[][^）)\]】\n]{1,40}[）)\]】]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
+// 调用 TTS 代理服务（如果代理失效，会降级到 Web Speech API）
+async function getAudioBlobFromTTS(text: string, endpoint: string): Promise<Blob | null> {
   const ssml = `
     <speak version="1.0" xmlns="https://www.w3.org/2001/10/synthesis" xml:lang="zh-CN">
       <voice name="${DEFAULT_EDGE_VOICE}">${text}</voice>
     </speak>
   `
   try {
-    const response = await fetch('http://localhost:8001/tts/synthesize', {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/ssml+xml' },
       body: ssml,
@@ -31,7 +47,7 @@ async function getAudioBlobFromEdgeTTS(text: string): Promise<Blob | null> {
     if (!response.ok) return null
     return await response.blob()
   } catch (error) {
-    console.error('Edge TTS 调用失败，将降级到 Web Speech API:', error)
+    console.error('TTS 代理调用失败，将降级到 Web Speech API:', error)
     return null
   }
 }
@@ -42,6 +58,8 @@ export function useSpeechSynthesis(options: UseSpeechSynthesisOptions = {}) {
     rate = 0.9,
     pitch = 1,
     volume = 1,
+    preferChinese = true,
+    ttsEndpoint = import.meta.env.VITE_TTS_ENDPOINT || '/tts/synthesize',
   } = options
 
   // 状态
@@ -76,7 +94,12 @@ export function useSpeechSynthesis(options: UseSpeechSynthesisOptions = {}) {
         updateVoicesList(voices)
         resolve()
       } else {
+        const fallbackTimer = window.setTimeout(() => {
+          updateVoicesList(window.speechSynthesis.getVoices())
+          resolve()
+        }, 800)
         window.speechSynthesis.onvoiceschanged = () => {
+          window.clearTimeout(fallbackTimer)
           updateVoicesList(window.speechSynthesis.getVoices())
           resolve()
         }
@@ -89,7 +112,9 @@ export function useSpeechSynthesis(options: UseSpeechSynthesisOptions = {}) {
     availableVoices.value = voices
     // 自动选择一个中文女声作为降级备用
     const chineseVoice = voices.find(v => v.lang.startsWith('zh') && (v.name.includes('Female') || v.name.includes('Xiaoxiao')))
-    selectedVoice.value = chineseVoice || voices.find(v => v.lang.startsWith('zh')) || voices[0] || null
+    selectedVoice.value = preferChinese
+      ? chineseVoice || voices.find(v => v.lang.startsWith('zh')) || voices[0] || null
+      : voices[0] || null
   }
 
   // 停止所有播放（Edge TTS + Web Speech）
@@ -141,7 +166,8 @@ export function useSpeechSynthesis(options: UseSpeechSynthesisOptions = {}) {
 
   // 主要朗读函数
   async function speak(text: string) {
-    if (!text?.trim()) {
+    const normalizedText = normalizeSpeechText(text)
+    if (!normalizedText) {
       errorMessage.value = '没有可朗读的文本'
       return
     }
@@ -149,13 +175,13 @@ export function useSpeechSynthesis(options: UseSpeechSynthesisOptions = {}) {
     // 停止当前正在播放的内容
     stopSpeaking()
 
-    // 1. 优先尝试 Edge TTS（高质量女声）
-    const audioBlob = await getAudioBlobFromEdgeTTS(text)
+    // 1. 优先尝试后端 TTS 代理，使用晓晓音色；失败后再降级浏览器语音
+    const audioBlob = ttsEndpoint ? await getAudioBlobFromTTS(normalizedText, ttsEndpoint) : null
     if (audioBlob) {
       const audioUrl = URL.createObjectURL(audioBlob)
       const audio = new Audio(audioUrl)
       currentAudio = audio
-      currentText.value = text
+      currentText.value = normalizedText
 
       // 设置状态
       isSpeaking.value = true
@@ -174,7 +200,7 @@ export function useSpeechSynthesis(options: UseSpeechSynthesisOptions = {}) {
         }
       }
       audio.onerror = (err) => {
-        console.error('Edge TTS 播放错误:', err)
+        console.error('TTS 音频播放错误:', err)
         URL.revokeObjectURL(audioUrl)
         if (currentAudio === audio) {
           currentAudio = null
@@ -184,18 +210,25 @@ export function useSpeechSynthesis(options: UseSpeechSynthesisOptions = {}) {
         isPending.value = false
         currentText.value = ''
         // 降级：尝试 Web Speech API
-        speakWithWebSpeech(text)
+        speakWithWebSpeech(normalizedText)
       }
 
       await audio.play().catch(err => {
-        console.error('audio.play() 失败:', err)
-        // 自动播放策略可能被浏览器阻止，但用户点击触发应该没问题
+        console.error('audio.play() 失败，将降级到 Web Speech API:', err)
+        URL.revokeObjectURL(audioUrl)
+        if (currentAudio === audio) {
+          currentAudio = null
+        }
+        isSpeaking.value = false
+        isPending.value = false
+        currentText.value = ''
+        return speakWithWebSpeech(normalizedText)
       })
       return
     }
 
     // 2. 降级方案：使用 Web Speech API
-    speakWithWebSpeech(text)
+    speakWithWebSpeech(normalizedText)
   }
 
   async function speakWithWebSpeech(text: string) {

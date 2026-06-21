@@ -25,7 +25,7 @@
   --radius-xl: 32px;
   --radius-lg: 24px;
   --radius-md: 18px;
-  --page-width: min(1220px, calc(100vw - 40px));
+  --page-width: min(1840px, calc(100vw - 48px));
 }
 
 * {
@@ -115,18 +115,19 @@ a:focus-visible {
   position: sticky;
   top: 0;
   z-index: 20;
-  padding: 16px 0 0;
+  padding: 18px 0 0;
 }
 
 .app-header__inner {
   width: var(--page-width);
   margin: 0 auto;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: minmax(280px, 1fr) auto minmax(280px, 1fr);
   gap: 20px;
   align-items: center;
-  padding: 16px 18px;
-  border-radius: 28px;
+  min-height: 78px;
+  padding: 10px 30px;
+  border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.72);
   background: rgba(244, 249, 255, 0.82);
   box-shadow: var(--shadow-soft);
@@ -140,15 +141,17 @@ a:focus-visible {
 }
 
 .brand-button__badge {
-  width: 52px;
-  height: 52px;
-  border-radius: 18px;
+  width: 46px;
+  height: 46px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-weight: 800;
-  color: white;
-  background: linear-gradient(135deg, var(--brand), var(--brand-strong));
+}
+
+.brand-button__badge img {
+  width: 46px;
+  height: 46px;
+  object-fit: contain;
 }
 
 .brand-button__copy {
@@ -180,6 +183,7 @@ a:focus-visible {
 .app-actions {
   justify-content: flex-end;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .app-nav__link,
@@ -203,6 +207,7 @@ a:focus-visible {
 
 .app-nav__link,
 .app-actions__ghost {
+  position: relative;
   border: 1px solid transparent;
 }
 
@@ -214,9 +219,21 @@ a:focus-visible {
   transform: translateY(-1px);
 }
 
-.app-nav__link.is-active,
-.app-actions__ghost {
-  background: rgba(78, 135, 197, 0.08);
+.app-nav__link.is-active {
+  color: #0876d6;
+  background: transparent;
+  font-weight: 800;
+}
+
+.app-nav__link.is-active::after {
+  content: '';
+  position: absolute;
+  right: 18px;
+  bottom: 2px;
+  left: 18px;
+  height: 4px;
+  border-radius: 999px;
+  background: #0876d6;
 }
 
 .app-actions__primary,
@@ -252,18 +269,41 @@ a:focus-visible {
   color: var(--ink-strong);
 }
 
-.app-main,
+.theme-home .session-pill {
+  min-height: 42px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+}
+
+.theme-home .session-pill span {
+  display: none;
+}
+
+.theme-home .session-pill strong {
+  color: #0876d6;
+}
+
+.theme-home .app-actions__primary {
+  min-height: 42px;
+  padding: 0 8px;
+  color: #8b939a;
+  background: transparent;
+  box-shadow: none;
+}
+
 .page-width {
   width: var(--page-width);
   margin: 0 auto;
 }
 
 .app-main {
-  padding-top: 18px;
+  width: 100%;
+  padding-top: 22px;
 }
 
 .role-page {
-  padding: 10px 0 36px;
+  padding: 0 0 28px;
 }
 
 .surface-card {
@@ -299,6 +339,11 @@ a:focus-visible {
 .theme-elderly {
   --brand: #53a9b7;
   --brand-strong: #2b8696;
+  background: #eef7f8;
+}
+
+.theme-elderly .app-main {
+  background: #eef7f8;
 }
 
 .theme-family {
@@ -328,7 +373,7 @@ a:focus-visible {
 
 @media (max-width: 640px) {
   :root {
-    --page-width: calc(100vw - 20px);
+    --page-width: calc(100vw - 24px);
   }
 
   .app-header {

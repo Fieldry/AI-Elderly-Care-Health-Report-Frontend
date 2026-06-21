@@ -70,7 +70,8 @@ function normalizeSession(raw: unknown): AuthSession | null {
       expiresAt,
       userId,
       sessionId,
-      userType: typeof record.userType === 'string' ? record.userType : undefined
+      userType: typeof record.userType === 'string' ? record.userType : undefined,
+      bindCode: typeof record.bindCode === 'string' ? record.bindCode : undefined
     }
   }
 
@@ -440,6 +441,13 @@ export function clearStoredSession() {
   state.session = null
   if (typeof window !== 'undefined') {
     window.localStorage.removeItem(STORAGE_KEY)
+  }
+}
+
+export function clearStoredElderlySession() {
+  state.lastElderlySession = null
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(LAST_ELDERLY_SESSION_KEY)
   }
 }
 
