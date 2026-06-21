@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 
 import { ApiError } from '@/api/core'
@@ -18,9 +18,18 @@ import {
 import { getElderlyProfile, getElderlyReportDetail } from '@/api/elderly'
 import { exportReportPdf } from '@/api/report'
 import ProfileOverview from '@/components/ProfileOverview.vue'
+import chatAssistantAvatar from '@/assets/lanhu/chat-assistant-avatar.png'
+import chatUserAvatar from '@/assets/lanhu/chat-user-avatar.png'
+import iconCounselingAction from '@/assets/lanhu/icon-counseling-action.png'
+import iconDialogue from '@/assets/lanhu/icon-dialogue.png'
+import iconLargeText from '@/assets/lanhu/icon-large-text.png'
+import iconNewAssessment from '@/assets/lanhu/icon-new-assessment.png'
+import iconVoice from '@/assets/lanhu/icon-voice.png'
 import { useGoogleStreamingSpeech } from '@/composables/useGoogleStreamingSpeech'
 import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
+import { useSpeechSynthesis } from '@/composables/useSpeechSynthesis'
 import {
+  clearStoredElderlySession,
   clearStoredElderlySessionSnapshot,
   getStoredElderlySession,
   getStoredElderlySessionSnapshot,
@@ -120,9 +129,100 @@ function normalizeMessageMarkdown(content: string) {
     .join('\n')
 }
 
+function normalizeBindCodeFromPayload(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') {
+    return ''
+  }
+
+  const source = payload as Record<string, unknown>
+  const candidates = [
+    source.bindCode,
+    source.bind_code,
+    source.bindingCode,
+    source.binding_code,
+    source.elderBindCode,
+    source.elder_bind_code,
+    source.elderlyBindCode,
+    source.elderly_bind_code,
+    source.inviteCode,
+    source.invite_code
+  ]
+
+  const matched = candidates.find((value) => typeof value === 'string' || typeof value === 'number')
+  if (matched === undefined || matched === null) {
+    const nestedSources = [source.profile, source.data, source.result, source.payload]
+    for (const nested of nestedSources) {
+      const nestedBindCode = normalizeBindCodeFromPayload(nested)
+      if (nestedBindCode) {
+        return nestedBindCode
+      }
+    }
+
+    return ''
+  }
+
+  return String(matched).trim()
+}
+
 function renderMessageContent(content: string | undefined): string {
   if (!content) return '...'
   return md.render(normalizeMessageMarkdown(content))
+}
+
+function normalizeWelcomeSpeechText(text: string) {
+  return (text || '')
+    .replace(/^\s*#{1,6}\s*/gm, '')
+    .replace(/^\s*(?:[-*+]|>\s*|\d+[.)])\s*/gm, '')
+    .replace(/\r?\n+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/[#*_`~]+/g, '')
+    .replace(/[（(【\[][^）)\]】\n]{1,40}[）)\]】]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
+let welcomeAudio: HTMLAudioElement | null = null
+let welcomeAudioUrl = ''
+let welcomeTtsAbortController: AbortController | null = null
+let isAssessmentPageActive = true
+
+function stopWelcomeAudio() {
+  welcomeTtsAbortController?.abort()
+  welcomeTtsAbortController = null
+
+  if (welcomeAudio) {
+    welcomeAudio.pause()
+    welcomeAudio.onended = null
+    welcomeAudio.onerror = null
+    welcomeAudio = null
+  }
+
+  if (welcomeAudioUrl) {
+    URL.revokeObjectURL(welcomeAudioUrl)
+    welcomeAudioUrl = ''
+  }
+
+  if (speakingMessageIndex.value === 0) {
+    speakingMessageIndex.value = null
+  }
+}
+
+function stopAllAssessmentAudio() {
+  stopWelcomeAudio()
+  stopSpeaking()
+}
+
+async function speakWelcomeMessage() {
+  const firstMessage = messages.value[0]
+  const welcomeText = firstMessage?.role === 'assistant'
+    ? normalizeWelcomeSpeechText(firstMessage.content)
+    : ''
+  if (!welcomeText) {
+    return
+  }
+
+  await nextTick()
+  autoSpeakAssistantMessage(welcomeText, 0)
 }
 
 const elderlyAccessSession = ref<ElderlyAuthSession | null>(null)
@@ -141,15 +241,20 @@ const generatingReport = ref(false)
 const conversationState = ref('greeting')
 const currentInteraction = ref<ChatInteraction | null>(null)
 const interactionModalVisible = ref(false)
+const interactionLaunchRequested = ref(false)
+const shouldOpenNextInteraction = ref(false)
 const interactionValues = ref<Record<string, unknown>>({})
 const errorMessage = ref('')
-const copyIdButtonText = ref('复制我的号码')
+const copyIdButtonText = ref('复制号码')
 const completionPercent = ref<number | null>(null)
 const selectedReportId = ref('')
 const selectedReportDetail = ref<Record<string, unknown> | null>(null)
 const selectedReportLoading = ref(false)
 const downloadingReportId = ref('')
 const openingSessionReportId = ref('')
+const largeTextMode = ref(false)
+const speakingMessageIndex = ref<number | null>(null)
+const promptedInteractionMessageId = ref('')
 
 const chatBodyRef = ref<HTMLElement | null>(null)
 const interactionModalTimer = ref<ReturnType<typeof setTimeout> | null>(null)
@@ -214,6 +319,7 @@ const selectedReportPointSections = computed(() => {
   return []
 })
 const elderlyUserId = computed(() => elderlyAccessSession.value?.userId || '')
+const elderlyBindCode = computed(() => elderlyAccessSession.value?.bindCode || '')
 const progressPercentLabel = computed(() =>
   completionPercent.value === null ? '未获取' : `${completionPercent.value}%`
 )
@@ -224,15 +330,26 @@ const isChatInputMode = computed(
   () => !currentInteraction.value || currentInteraction.value.kind === 'chat'
 )
 const showInteractionModal = computed(
-  () => Boolean(currentInteraction.value && !isChatInputMode.value && interactionModalVisible.value && !generatingReport.value)
+  () => Boolean(
+    currentInteraction.value &&
+    !isChatInputMode.value &&
+    interactionLaunchRequested.value &&
+    interactionModalVisible.value &&
+    !generatingReport.value
+  )
 )
 const interactionEntryLabel = computed(() =>
   currentInteraction.value?.kind === 'confirm' ? '打开确认卡片' : '打开选择题卡片'
 )
-const interactionPendingText = computed(() =>
-  interactionModalVisible.value
-    ? '题卡当前已打开，也可以先取消并稍后继续。'
-    : '您已暂停当前题卡，可随时重新打开继续作答。'
+const CARD_INTERACTION_NOTICE =
+  '这几道题为方便您回答，会直接弹出一个小卡片，请点击下方按钮打开卡片，您可以根据实际情况进行选择。'
+const CONFIRM_INTERACTION_NOTICE =
+  '信息已经收集得差不多了。请点击下方按钮打开确认卡片，确认无误后就可以生成报告。'
+const SKIP_VALUE = '__SKIPPED__'
+const inputPlaceholder = computed(() =>
+  sending.value
+    ? '正在发送，请稍候。'
+    : '请按上方问题回答，也可以补充您觉得重要的情况。'
 )
 const canConfirmReport = computed(
   () => currentInteraction.value?.kind === 'confirm' && !sending.value && !loading.value
@@ -281,6 +398,17 @@ const {
 })
 
 const {
+  speak: speakText,
+  stop: stopSpeaking,
+  isSpeaking: isTtsSpeaking,
+  isSupported: isTtsSupported
+} = useSpeechSynthesis({
+  lang: 'zh-CN',
+  rate: 0.9,
+  preferChinese: true
+})
+
+const {
   isListening: isBrowserVoiceListening,
   isSupported: isBrowserVoiceSupported,
   errorMessage: browserVoiceError,
@@ -323,6 +451,12 @@ const voiceHintText = computed(() => {
   }
 
   return '点击语音输入即可说话。'
+})
+
+watch(isTtsSpeaking, (newVal) => {
+  if (!newVal) {
+    speakingMessageIndex.value = null
+  }
 })
 
 function cloneJson<T>(value: T) {
@@ -403,10 +537,16 @@ function toggleInteractionMultiSelect(key: string) {
 function describeInteractionAnswer(interaction: ChatInteraction, values: Record<string, unknown>): string {
   if (interaction.kind === 'single_choice' && interaction.field) {
     const answer = getStringValue(values[interaction.field])
+    if (answer === SKIP_VALUE) {
+      return `跳过：${interaction.prompt}`
+    }
     return answer || '已提交选项'
   }
 
   if (interaction.kind === 'matrix_single_choice') {
+    if ((interaction.items || []).every((item) => getStringValue(values[item.key]) === SKIP_VALUE)) {
+      return `跳过：${interaction.prompt}`
+    }
     return (interaction.items || [])
       .map((item) => `${item.label}：${getStringValue(values[item.key])}`)
       .filter((item) => item.replace(/：$/, '') !== '')
@@ -414,6 +554,9 @@ function describeInteractionAnswer(interaction: ChatInteraction, values: Record<
   }
 
   if (interaction.kind === 'multi_select') {
+    if (values.selected === SKIP_VALUE) {
+      return `跳过：${interaction.prompt}`
+    }
     const selected = new Set(Array.isArray(values.selected) ? values.selected.map((item) => String(item)) : [])
     const labels = (interaction.items || [])
       .filter((item) => selected.has(item.key))
@@ -422,6 +565,9 @@ function describeInteractionAnswer(interaction: ChatInteraction, values: Record<
   }
 
   if (interaction.kind === 'form_card') {
+    if (interactionFields.value.every((field) => getStringValue(values[field.key]) === SKIP_VALUE)) {
+      return `跳过：${interaction.prompt}`
+    }
     return interactionFields.value
       .map((field) => {
         const value = getStringValue(values[field.key])
@@ -440,6 +586,57 @@ function describeInteractionAnswer(interaction: ChatInteraction, values: Record<
 
 function getStringValue(value: unknown): string {
   return typeof value === 'string' ? value : ''
+}
+
+function isCardInteraction(interaction: ChatInteraction | null | undefined) {
+  return Boolean(interaction && interaction.kind !== 'chat' && interaction.kind !== 'confirm')
+}
+
+function getInteractionNoticeText(interaction: ChatInteraction | null | undefined) {
+  if (!interaction || interaction.kind === 'chat') {
+    return ''
+  }
+
+  return interaction.kind === 'confirm' ? CONFIRM_INTERACTION_NOTICE : CARD_INTERACTION_NOTICE
+}
+
+function isInteractionLaunchMessage(message: ChatMessage, index: number) {
+  const expectedText = getInteractionNoticeText(currentInteraction.value)
+  if (!expectedText || message.role !== 'assistant' || message.content.trim() !== expectedText) {
+    return false
+  }
+
+  for (let messageIndex = messages.value.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const candidate = messages.value[messageIndex]
+    if (candidate.role === 'assistant' && candidate.content.trim() === expectedText) {
+      return messageIndex === index
+    }
+  }
+
+  return false
+}
+
+function shouldShowInteractionScrollHint(interaction: ChatInteraction | null | undefined) {
+  return Boolean(interaction && ['g4_badl', 'g5_iadl'].includes(interaction.id))
+}
+
+function appendInteractionPromptMessage() {
+  const interaction = currentInteraction.value
+  if (!isCardInteraction(interaction) || !interaction?.prompt.trim()) {
+    return
+  }
+
+  if (promptedInteractionMessageId.value === interaction.id) {
+    return
+  }
+
+  promptedInteractionMessageId.value = interaction.id
+  messages.value.push({
+    role: 'assistant',
+    content: interaction.prompt
+  })
+  persistCurrentSnapshot()
+  void nextTick().then(scrollChatToBottom)
 }
 
 function extractReportPoints(markdown: string) {
@@ -592,10 +789,43 @@ function persistCurrentSnapshot(metadata = resolveSnapshotMetadata()) {
 }
 
 function setCurrentInteraction(nextInteraction: ChatInteraction | null | undefined) {
-  const previousId = currentInteraction.value?.id || ''
-  const nextId = nextInteraction?.id || ''
-  currentInteraction.value = nextInteraction ? cloneJson(nextInteraction) : null
-  if (previousId !== nextId) {
+  const previousInteraction = currentInteraction.value
+  const normalizedInteraction = nextInteraction ? cloneJson(nextInteraction) : null
+  const hasInteractionChanged =
+    (previousInteraction?.id || '') !== (normalizedInteraction?.id || '') ||
+    (previousInteraction?.kind || '') !== (normalizedInteraction?.kind || '') ||
+    (previousInteraction?.prompt || '') !== (normalizedInteraction?.prompt || '')
+  const shouldAutoOpen =
+    shouldOpenNextInteraction.value &&
+    Boolean(normalizedInteraction && normalizedInteraction.kind !== 'chat' && normalizedInteraction.kind !== 'confirm')
+
+  currentInteraction.value = normalizedInteraction
+  if (!normalizedInteraction || normalizedInteraction.kind === 'chat') {
+    if (interactionModalTimer.value) {
+      clearTimeout(interactionModalTimer.value)
+      interactionModalTimer.value = null
+    }
+    shouldOpenNextInteraction.value = false
+    interactionLaunchRequested.value = false
+    interactionModalVisible.value = false
+    resetInteractionValues(currentInteraction.value)
+    return
+  }
+
+  if (shouldAutoOpen) {
+    if (interactionModalTimer.value) {
+      clearTimeout(interactionModalTimer.value)
+      interactionModalTimer.value = null
+    }
+    shouldOpenNextInteraction.value = false
+    interactionLaunchRequested.value = true
+    interactionModalVisible.value = true
+  } else if (hasInteractionChanged) {
+    interactionLaunchRequested.value = false
+    interactionModalVisible.value = false
+  }
+
+  if (hasInteractionChanged) {
     resetInteractionValues(currentInteraction.value)
   }
 }
@@ -683,11 +913,36 @@ function openInteractionModal() {
     return
   }
 
+  interactionLaunchRequested.value = true
   interactionModalVisible.value = true
+  appendInteractionPromptMessage()
+}
+
+function speakInteractionPrompt() {
+  const promptText = currentInteraction.value?.prompt?.trim()
+  if (!promptText || !isTtsSupported.value) {
+    return
+  }
+
+  if (isTtsSpeaking.value) {
+    stopSpeaking()
+  }
+
+  speakingMessageIndex.value = -1
+  void speakText(promptText).catch(() => {
+    if (speakingMessageIndex.value === -1) {
+      speakingMessageIndex.value = null
+    }
+  })
 }
 
 function dismissInteractionModal() {
+  interactionLaunchRequested.value = false
   interactionModalVisible.value = false
+}
+
+function toggleLargeTextMode() {
+  largeTextMode.value = !largeTextMode.value
 }
 
 function getSessionLabel(item: SessionMetadata, index: number) {
@@ -706,21 +961,70 @@ function getLatestReportId(items: Array<Record<string, unknown>>) {
   return getReportId(sortReportsByGeneratedAt(items)[0] || null)
 }
 
-async function copyElderlyUserId() {
-  if (!elderlyUserId.value) {
-    copyIdButtonText.value = 'ID 未就绪'
+function applyBindCode(nextBindCode: string) {
+  const bindCode = nextBindCode.trim()
+  if (!bindCode) {
+    return
+  }
+
+  if (elderlyAccessSession.value?.bindCode === bindCode) {
+    return
+  }
+
+  if (elderlyAccessSession.value) {
+    const nextSession = {
+      ...elderlyAccessSession.value,
+      bindCode
+    } satisfies ElderlyAuthSession
+    elderlyAccessSession.value = nextSession
+    setStoredSession(nextSession)
+  }
+}
+
+async function resolveBindCodeForCopy() {
+  if (elderlyBindCode.value) {
+    return elderlyBindCode.value
+  }
+
+  if (!elderlyToken.value) {
+    console.warn('[绑定码] elderlyToken 为空，无法请求老人资料')
+    return ''
+  }
+
+  try {
+    const selfProfile = await getElderlyProfile(elderlyToken.value)
+    console.log('[绑定码] getElderlyProfile 返回：', selfProfile)
+    const bindCode = normalizeBindCodeFromPayload(selfProfile)
+    if (!bindCode) {
+      console.warn('[绑定码] 老人资料中未找到号码字段')
+      return ''
+    }
+    applyBindCode(bindCode)
+    return bindCode
+  } catch (error) {
+    console.error('[绑定码] getElderlyProfile 请求失败：', error)
+    errorMessage.value = '号码获取失败，请检查后端是否返回了号码。'
+    return ''
+  }
+}
+
+async function copyBindCode() {
+  const bindCode = await resolveBindCodeForCopy()
+
+  if (!bindCode) {
+    copyIdButtonText.value = '号码未就绪'
     window.setTimeout(() => {
-      copyIdButtonText.value = '复制我的号码'
+      copyIdButtonText.value = '复制号码'
     }, 1600)
     return
   }
 
   try {
     if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(elderlyUserId.value)
+      await navigator.clipboard.writeText(bindCode)
     } else {
       const textarea = document.createElement('textarea')
-      textarea.value = elderlyUserId.value
+      textarea.value = bindCode
       textarea.setAttribute('readonly', 'true')
       textarea.style.position = 'fixed'
       textarea.style.opacity = '0'
@@ -736,7 +1040,7 @@ async function copyElderlyUserId() {
   }
 
   window.setTimeout(() => {
-    copyIdButtonText.value = '复制我的号码'
+    copyIdButtonText.value = '复制号码'
   }, 1800)
 }
 
@@ -749,7 +1053,8 @@ function applyStartedSession(response: ChatStartResponse) {
     expiresAt: response.expiresAt,
     userId: response.userId,
     sessionId: response.sessionId,
-    userType: response.userType
+    userType: response.userType,
+    bindCode: response.bindCode
   } satisfies ElderlyAuthSession
 
   updateActiveElderlySession(nextSession)
@@ -819,6 +1124,16 @@ async function refreshSessionArtifacts(targetSessionId: string, token: string) {
   const selfProfile = selfProfileResult.status === 'fulfilled' ? selfProfileResult.value : {}
 
   profile.value = mergeProfileSnapshots(selfProfile, profile.value || {}, latestProfile)
+
+  const selfBindCode = normalizeBindCodeFromPayload(selfProfile)
+  if (selfBindCode && elderlyAccessSession.value && elderlyAccessSession.value.bindCode !== selfBindCode) {
+    const nextSession = {
+      ...elderlyAccessSession.value,
+      bindCode: selfBindCode
+    } satisfies ElderlyAuthSession
+    elderlyAccessSession.value = nextSession
+    setStoredSession(nextSession)
+  }
 }
 
 async function refreshCurrentSessionReports(targetSessionId: string, token: string) {
@@ -855,6 +1170,7 @@ async function loadExistingSession(targetSessionId: string, token: string) {
   loading.value = true
   errorMessage.value = ''
   clearVoiceInput()
+  stopSpeaking()
 
   try {
     updateCurrentSessionId(targetSessionId)
@@ -907,6 +1223,7 @@ async function createNewSession() {
   sending.value = false
   errorMessage.value = ''
   clearVoiceInput()
+  stopSpeaking()
   resetSelectedReport()
 
   try {
@@ -928,9 +1245,11 @@ async function createNewSession() {
 
     await Promise.allSettled([
       refreshSessions(response.accessToken),
-      refreshProgressState(response.sessionId, response.accessToken)
+      refreshProgressState(response.sessionId, response.accessToken),
+      refreshSessionArtifacts(response.sessionId, response.accessToken)
     ])
     persistCurrentSnapshot(resolveSnapshotMetadata(response.sessionId))
+    await speakWelcomeMessage()
   } catch (error) {
     errorMessage.value =
       error instanceof Error ? error.message : '启动评估失败，请检查后端服务是否可用。'
@@ -960,13 +1279,23 @@ async function initializeAssessment() {
   }
 
   updateActiveElderlySession(preferredSession)
+  if (session.value?.role !== 'elderly') {
+    setStoredSession(preferredSession)
+  }
   hydrateSessionsFromLocal(preferredSession.userId)
 
   try {
     const availableSessions = await refreshSessions(preferredSession.token)
     const targetSessionId = resolveInitialSessionId(preferredSession, availableSessions)
     await loadExistingSession(targetSessionId, preferredSession.token)
-  } catch {
+  } catch (error) {
+    if (isForbidden(error)) {
+      clearStoredElderlySession()
+      clearStoredElderlySessionSnapshot(preferredSession.sessionId)
+      await createNewSession()
+      return
+    }
+
     const localSessions = hydrateSessionsFromLocal(preferredSession.userId)
     const localTargetSessionId =
       resolveInitialSessionId(preferredSession, localSessions) || localSessions[0]?.session_id || ''
@@ -985,7 +1314,6 @@ async function finalizeInteractionResponse(response: ChatMessageResponse) {
   setCurrentInteraction(response.interaction || null)
 
   const refreshTasks: Array<Promise<unknown>> = [
-    refreshProgressState(sessionId.value, elderlyToken.value).catch(() => {}),
     refreshSessionArtifacts(sessionId.value, elderlyToken.value),
     refreshSessions(elderlyToken.value)
   ]
@@ -1008,6 +1336,7 @@ async function handleSend() {
   sending.value = true
   errorMessage.value = ''
   clearVoiceInput()
+  stopSpeaking()
 
   messages.value.push({
     role: 'user',
@@ -1044,7 +1373,12 @@ async function handleSend() {
       await revealAssistantMessage(assistantIndex, response.message)
     }
 
+    if (isCardInteraction(response.interaction)) {
+      messages.value[assistantIndex].content = CARD_INTERACTION_NOTICE
+    }
+
     await finalizeInteractionResponse(response)
+    autoSpeakAssistantMessage(messages.value[assistantIndex]?.content || response.message, assistantIndex)
   } catch (error) {
     if (!messages.value[assistantIndex]?.content) {
       messages.value.splice(assistantIndex, 1)
@@ -1069,10 +1403,12 @@ async function submitStructuredInteraction(values: Record<string, unknown>) {
 
   const interaction = cloneJson(currentInteraction.value)
   const userDisplayText = describeInteractionAnswer(interaction, values)
+  const canContinueWithNextCard = interaction.kind !== 'confirm'
   sending.value = true
   generatingReport.value = interaction.kind === 'confirm'
   errorMessage.value = ''
   clearVoiceInput()
+  stopSpeaking()
 
   messages.value.push({
     role: 'user',
@@ -1097,10 +1433,20 @@ async function submitStructuredInteraction(values: Record<string, unknown>) {
         values
       }
     )
-    await revealAssistantMessage(assistantIndex, response.message)
+    if (isCardInteraction(response.interaction) && canContinueWithNextCard) {
+      messages.value.splice(assistantIndex, 1)
+    } else {
+      await revealAssistantMessage(assistantIndex, response.message)
+    }
+    shouldOpenNextInteraction.value = canContinueWithNextCard
+    promptedInteractionMessageId.value = ''
     await finalizeInteractionResponse(response)
+    if (!isCardInteraction(response.interaction)) {
+      autoSpeakAssistantMessage(messages.value[assistantIndex]?.content || response.message, assistantIndex)
+    }
     return true
   } catch (error) {
+    shouldOpenNextInteraction.value = false
     if (!messages.value[assistantIndex]?.content) {
       messages.value.splice(assistantIndex, 1)
     }
@@ -1117,6 +1463,47 @@ async function submitStructuredInteraction(values: Record<string, unknown>) {
     sending.value = false
     generatingReport.value = false
   }
+}
+
+function autoSpeakAssistantMessage(content: string, index: number) {
+  const nextContent = content.trim()
+  if (!nextContent || !isTtsSupported.value) {
+    return
+  }
+
+  if (isTtsSpeaking.value) {
+    stopSpeaking()
+  }
+
+  speakingMessageIndex.value = index
+  void speakText(nextContent).catch(() => {
+    if (speakingMessageIndex.value === index) {
+      speakingMessageIndex.value = null
+    }
+  })
+}
+
+function handleSpeakMessage(content: string, index: number) {
+  const nextContent = content.trim()
+  if (!nextContent || !isTtsSupported.value) {
+    return
+  }
+
+  if (speakingMessageIndex.value === index && isTtsSpeaking.value) {
+    stopSpeaking()
+    return
+  }
+
+  if (isTtsSpeaking.value) {
+    stopSpeaking()
+  }
+
+  speakingMessageIndex.value = index
+  void speakText(nextContent).catch(() => {
+    if (speakingMessageIndex.value === index) {
+      speakingMessageIndex.value = null
+    }
+  })
 }
 
 function isInteractionValueSelected(key: string, value: string) {
@@ -1176,6 +1563,36 @@ async function handleCurrentInteractionSubmit() {
         values[field.custom_key] = getInteractionFieldValue(field.custom_key)
       }
     }
+    await submitStructuredInteraction(values)
+  }
+}
+
+async function handleSkipInteraction() {
+  if (!currentInteraction.value || currentInteraction.value.kind === 'confirm') {
+    return
+  }
+
+  errorMessage.value = ''
+  const interaction = currentInteraction.value
+
+  if (interaction.kind === 'single_choice' && interaction.field) {
+    await submitStructuredInteraction({ [interaction.field]: SKIP_VALUE })
+    return
+  }
+
+  if (interaction.kind === 'matrix_single_choice') {
+    const values = Object.fromEntries(interactionItems.value.map((item) => [item.key, SKIP_VALUE]))
+    await submitStructuredInteraction(values)
+    return
+  }
+
+  if (interaction.kind === 'multi_select') {
+    await submitStructuredInteraction({ selected: SKIP_VALUE })
+    return
+  }
+
+  if (interaction.kind === 'form_card') {
+    const values = Object.fromEntries(interactionFields.value.map((field) => [field.key, SKIP_VALUE]))
     await submitStructuredInteraction(values)
   }
 }
@@ -1352,6 +1769,7 @@ watch(
         interactionModalTimer.value = null
       }
       interactionModalVisible.value = false
+      interactionLaunchRequested.value = false
       return
     }
 
@@ -1372,16 +1790,25 @@ watch(
       suppressModalReopen.value = false
       return
     }
-
-    interactionModalTimer.value = setTimeout(() => {
-      interactionModalVisible.value = true
-      interactionModalTimer.value = null
-    }, 800)
   },
   {
     immediate: true
   }
 )
+
+watch(showInteractionModal, async (visible, previousVisible) => {
+  if (!visible || previousVisible) {
+    return
+  }
+
+  if (currentInteraction.value?.kind === 'confirm') {
+    return
+  }
+
+  await nextTick()
+  appendInteractionPromptMessage()
+  speakInteractionPrompt()
+})
 
 watch(
   messages,
@@ -1394,28 +1821,53 @@ watch(
 )
 
 onMounted(async () => {
+  isAssessmentPageActive = true
   await initializeAssessment()
+})
+
+onUnmounted(() => {
+  isAssessmentPageActive = false
+  clearVoiceInput()
+  stopAllAssessmentAudio()
+})
+
+onBeforeRouteLeave(() => {
+  isAssessmentPageActive = false
+  clearVoiceInput()
+  stopAllAssessmentAudio()
 })
 </script>
 
 <template>
-  <div class="page-width role-page elderly-page">
+  <div class="page-width role-page elderly-page" :class="{ 'elderly-page--large-text': largeTextMode }">
     <section class="assessment-layout">
       <article class="surface-card chat-card">
         <header class="chat-card__header">
           <div class="chat-card__intro">
+            <p class="eyebrow">长者端</p>
             <h2>对话采集</h2>
+            <p class="chat-card__lead">按大字号对话、语音输入和结构化题卡，逐步完成健康信息采集。</p>
           </div>
           <div class="chat-card__header-actions">
             <p>这是您的号码，可复制给您的家属绑定</p>
-            <button
-              class="secondary-button copy-id-button"
-              type="button"
-              :disabled="!elderlyUserId"
-              @click="copyElderlyUserId"
-            >
-              {{ copyIdButtonText }}
-            </button>
+            <strong class="elderly-bind-code">
+              {{ elderlyBindCode || '号码生成中...' }}
+            </strong>
+            <div class="chat-card__header-tools">
+              <button
+                class="secondary-button copy-id-button"
+                type="button"
+                :disabled="!elderlyUserId || loading"
+                @click="copyBindCode"
+              >
+                <img class="tool-icon" :src="iconDialogue" alt="" />
+                {{ copyIdButtonText }}
+              </button>
+              <button class="secondary-button copy-id-button" type="button" @click="toggleLargeTextMode">
+                <img class="tool-icon" :src="iconLargeText" alt="" />
+                {{ largeTextMode ? '标准字号' : '大字模式' }}
+              </button>
+            </div>
           </div>
         </header>
 
@@ -1426,17 +1878,43 @@ onMounted(async () => {
             v-for="(message, index) in messages"
             :key="`${message.role}-${index}`"
             class="message-bubble"
-            :class="`message-bubble--${message.role}`"
+            :class="[
+              `message-bubble--${message.role}`,
+              { 'message-bubble--notice': isInteractionLaunchMessage(message, index) }
+            ]"
           >
-            <span class="message-bubble__avatar">{{ message.role === 'assistant' ? '健' : '我' }}</span>
+            <span class="message-bubble__avatar">
+              <img
+                :src="message.role === 'assistant' ? chatAssistantAvatar : chatUserAvatar"
+                :alt="message.role === 'assistant' ? '健康助手' : '我'"
+              />
+            </span>
             <div class="message-bubble__panel">
               <div class="message-bubble__meta">
                 <span class="message-bubble__role">{{ message.role === 'assistant' ? '健康助手' : '我' }}</span>
                 <span v-if="message.timestamp" class="message-bubble__time">
                   {{ formatDateTime(message.timestamp) }}
                 </span>
+                <button
+                  v-if="message.role === 'assistant' && message.content && isTtsSupported"
+                  class="speech-button"
+                  :class="{ 'speech-button--active': speakingMessageIndex === index && isTtsSpeaking }"
+                  type="button"
+                  :aria-label="speakingMessageIndex === index && isTtsSpeaking ? '停止朗读' : '朗读这条回复'"
+                  @click="handleSpeakMessage(message.content, index)"
+                >
+                  {{ speakingMessageIndex === index && isTtsSpeaking ? '停止' : '朗读' }}
+                </button>
               </div>
               <div class="message-bubble__content markdown-body" v-html="renderMessageContent(message.content)"></div>
+              <button
+                v-if="isInteractionLaunchMessage(message, index)"
+                class="primary-button notice-launch-button"
+                type="button"
+                @click="openInteractionModal"
+              >
+                {{ interactionEntryLabel }}
+              </button>
             </div>
           </article>
 
@@ -1450,15 +1928,15 @@ onMounted(async () => {
           <div class="composer-shell">
             <template v-if="generatingReport">
               <div class="composer-shell__header">
-                <label class="composer-label">报告生成中</label>
+                <label class="composer-label">智能体正在思考</label>
               </div>
               <div class="composer-disabled">
                 <p class="composer-disabled__title">
                   <span class="generating-spinner" />
-                  正在生成报告
+                  智能体正在思考
                 </p>
                 <p class="composer-disabled__text">
-                  请您稍等4-5分钟，报告正在生成中......
+                  请您稍等4-5分钟，智能体正在思考中......
                 </p>
                 <p class="composer-disabled__text composer-disabled__steps">
                   正在进行：失能状态判定 → 风险预测 → 健康画像 → 行动计划 → 报告生成
@@ -1475,7 +1953,7 @@ onMounted(async () => {
                 v-model="inputText"
                 class="composer-textarea"
                 :disabled="loading || sending"
-                placeholder="例如：我今年 82 岁。"
+                :placeholder="inputPlaceholder"
                 rows="1"
                 @keydown.enter.exact.prevent="handleSend"
               />
@@ -1487,6 +1965,7 @@ onMounted(async () => {
                     :disabled="loading || !isVoiceAvailable"
                     @click="toggleVoiceInput"
                   >
+                    <img class="tool-icon" :src="iconVoice" alt="" />
                     <span class="voice-button__dot" :class="{ 'is-live': isVoiceActive }" />
                     {{ voiceButtonLabel }}
                   </button>
@@ -1509,22 +1988,10 @@ onMounted(async () => {
               <div class="composer-shell__header">
                 <span class="composer-label">{{ currentInteraction.groupName || '当前题卡' }}</span>
               </div>
-              <div class="interaction-pending">
-                <p class="interaction-pending__title">当前有待完成的题卡</p>
-                <p class="interaction-pending__text">{{ interactionPendingText }}</p>
-                <div class="composer-actions composer-actions--card interaction-pending__actions">
-                  <button class="primary-button composer-submit" type="button" @click="openInteractionModal">
-                    {{ interactionEntryLabel }}
-                  </button>
-                  <button
-                    class="secondary-button composer-submit"
-                    type="button"
-                    :disabled="!interactionModalVisible"
-                    @click="dismissInteractionModal"
-                  >
-                    {{ interactionModalVisible ? '暂停答题' : '已暂停' }}
-                  </button>
-                </div>
+              <div class="interaction-launcher">
+                <button class="primary-button composer-submit" type="button" @click="openInteractionModal">
+                  {{ interactionEntryLabel }}
+                </button>
               </div>
             </template>
           </div>
@@ -1549,6 +2016,7 @@ onMounted(async () => {
 
           <div class="summary-card__actions">
             <button class="secondary-button summary-card__action" type="button" @click="handleStartNewAssessment">
+              <img class="tool-icon" :src="iconNewAssessment" alt="" />
               新建独立评估
             </button>
             <button
@@ -1557,6 +2025,7 @@ onMounted(async () => {
               :disabled="loading || !elderlyToken"
               @click="router.push('/elderly/counseling')"
             >
+              <img class="tool-icon" :src="iconCounselingAction" alt="" />
               进入心理咨询
             </button>
             <button
@@ -1646,7 +2115,21 @@ onMounted(async () => {
 
         <div class="interaction-modal__body">
           <div class="interaction-card">
-            <p class="interaction-card__prompt interaction-modal__prompt">{{ currentInteraction.prompt }}</p>
+            <div class="interaction-card__prompt-row">
+              <p class="interaction-card__prompt interaction-modal__prompt">{{ currentInteraction.prompt }}</p>
+              <button
+                class="speech-button speech-button--inline"
+                :class="{ 'speech-button--active': speakingMessageIndex === -1 && isTtsSpeaking }"
+                type="button"
+                :aria-label="speakingMessageIndex === -1 && isTtsSpeaking ? '停止朗读题目' : '朗读题目'"
+                @click="speakInteractionPrompt"
+              >
+                {{ speakingMessageIndex === -1 && isTtsSpeaking ? '停止' : '朗读' }}
+              </button>
+            </div>
+            <p v-if="shouldShowInteractionScrollHint(currentInteraction)" class="interaction-card__scroll-hint">
+              您可以上下滑动查看所有问题
+            </p>
 
             <div v-if="currentInteraction.kind === 'single_choice' && currentInteraction.field" class="choice-grid">
               <button
@@ -1693,18 +2176,20 @@ onMounted(async () => {
             </div>
 
             <div v-else-if="currentInteraction.kind === 'form_card'" class="form-card">
-              <label v-for="field in interactionFields" :key="field.key" class="form-card__field">
-                <span>{{ field.label }}</span>
-                <select
-                  class="composer-select"
-                  :value="getInteractionFieldValue(field.key)"
-                  @change="setInteractionFieldValue(field.key, String(($event.target as HTMLSelectElement).value || ''))"
-                >
-                  <option value="">请选择</option>
-                  <option v-for="option in field.options || []" :key="option.value" :value="option.value">
+              <section v-for="field in interactionFields" :key="field.key" class="form-card__field form-card__field--choice">
+                <p class="form-card__field-label">{{ field.label }}</p>
+                <div class="choice-grid choice-grid--compact">
+                  <button
+                    v-for="option in field.options || []"
+                    :key="`${field.key}-${option.value}`"
+                    class="choice-chip choice-chip--small"
+                    :class="{ 'is-selected': isInteractionValueSelected(field.key, option.value) }"
+                    type="button"
+                    @click="setInteractionFieldValue(field.key, option.value)"
+                  >
                     {{ option.label }}
-                  </option>
-                </select>
+                  </button>
+                </div>
                 <input
                   v-if="field.custom_key && getInteractionFieldValue(field.key) === '其他'"
                   class="composer-input"
@@ -1712,7 +2197,7 @@ onMounted(async () => {
                   :placeholder="field.placeholder || '请补充说明'"
                   @input="setInteractionFieldValue(field.custom_key, String(($event.target as HTMLInputElement).value || ''))"
                 />
-              </label>
+              </section>
             </div>
 
             <div v-else-if="currentInteraction.kind === 'confirm'" class="confirm-card">
@@ -1738,6 +2223,14 @@ onMounted(async () => {
                 @click="dismissInteractionModal"
               >
                 取消
+              </button>
+              <button
+                class="secondary-button composer-submit"
+                type="button"
+                :disabled="loading || sending"
+                @click="handleSkipInteraction"
+              >
+                跳过
               </button>
               <button
                 class="primary-button composer-submit"
@@ -1782,6 +2275,10 @@ onMounted(async () => {
         <div v-if="selectedReportLoading" class="report-modal__loading">正在加载报告详情...</div>
 
         <div v-else-if="selectedReportView" class="report-modal__body">
+          <article class="report-modal__notice">
+            本报告内容仅供健康管理参考，不能替代医生诊断和治疗建议。如有身体不适，请及时就医并遵医嘱。
+          </article>
+
           <article v-if="selectedReportView.summary" class="report-modal__summary">
             <strong>摘要</strong>
             <p>{{ selectedReportView.summary }}</p>
@@ -1830,7 +2327,7 @@ onMounted(async () => {
   padding: 28px;
   display: flex;
   flex-direction: column;
-  height: clamp(42rem, calc(100vh - 9.5rem), 52rem);
+  height: clamp(48rem, calc(100vh - 7rem), 60rem);
   background:
     radial-gradient(circle at top right, rgba(153, 220, 202, 0.18), transparent 24rem),
     linear-gradient(180deg, rgba(252, 254, 255, 0.98), rgba(236, 247, 248, 0.94));
@@ -1852,21 +2349,29 @@ onMounted(async () => {
 }
 
 .chat-card__header {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: start;
 }
 
 .chat-card__intro {
-  max-width: 20rem;
+  max-width: 32rem;
 }
 
 .chat-card__header-actions {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
-  justify-items: end;
-  max-width: 20rem;
+  justify-content: flex-end;
+  max-width: 24rem;
+}
+
+.chat-card__header-tools {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .chat-card__header h2 {
@@ -1892,6 +2397,14 @@ onMounted(async () => {
 .chat-card__lead {
   max-width: 32rem;
   line-height: 1.8;
+}
+
+.tool-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  margin-right: 8px;
+  flex-shrink: 0;
 }
 
 .chat-card__meta {
@@ -1969,6 +2482,16 @@ onMounted(async () => {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.message-bubble--notice .message-bubble__panel {
+  border: 1px solid rgba(83, 169, 183, 0.18);
+  background: rgba(235, 248, 249, 0.96);
+}
+
+.notice-launch-button {
+  margin-top: 12px;
+  min-height: 2.8rem;
+}
+
 .message-bubble__avatar {
   width: 42px;
   height: 42px;
@@ -2026,6 +2549,33 @@ onMounted(async () => {
 .message-bubble__time {
   color: var(--ink-muted);
   font-size: 0.82rem;
+}
+
+.speech-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3.5rem;
+  min-height: 2rem;
+  padding: 0 0.8rem;
+  border-radius: 999px;
+  border: 1px solid rgba(83, 169, 183, 0.18);
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--brand-strong);
+  font-size: 0.86rem;
+  font-weight: 800;
+  box-shadow: 0 8px 18px rgba(35, 84, 99, 0.08);
+}
+
+.speech-button:hover {
+  border-color: rgba(83, 169, 183, 0.34);
+  background: rgba(235, 248, 249, 0.96);
+}
+
+.speech-button--active {
+  border-color: rgba(43, 134, 150, 0.36);
+  background: rgba(83, 169, 183, 0.16);
+  color: var(--ink-strong);
 }
 
 .message-bubble__content {
@@ -2109,8 +2659,8 @@ onMounted(async () => {
   resize: none;
   border-radius: 22px;
   padding: 16px 18px;
-  min-height: 30px;
-  min-width: 650px;
+  min-height: 4rem;
+  width: 100%;
   line-height: 1.8;
   border-color: rgba(83, 169, 183, 0.16);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 249, 252, 0.96));
@@ -2164,6 +2714,23 @@ onMounted(async () => {
   gap: 16px;
 }
 
+.interaction-card__prompt-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.interaction-card__prompt-row .interaction-card__prompt {
+  margin: 0;
+  flex: 1;
+}
+
+.speech-button--inline {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
 .interaction-pending {
   padding: 18px 20px;
   border-radius: 24px;
@@ -2191,10 +2758,22 @@ onMounted(async () => {
   margin-top: 16px;
 }
 
+.interaction-launcher {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .interaction-card__prompt {
   margin: 0;
   color: var(--ink-strong);
   line-height: 1.7;
+}
+
+.interaction-card__scroll-hint {
+  margin: -6px 0 0;
+  color: var(--ink-muted);
+  font-size: 0.98rem;
+  line-height: 1.6;
 }
 
 .choice-grid {
@@ -2259,6 +2838,19 @@ onMounted(async () => {
   display: grid;
   gap: 8px;
   color: var(--ink-strong);
+}
+
+.form-card__field--choice {
+  padding: 14px;
+  border-radius: 20px;
+  background: rgba(246, 251, 253, 0.92);
+  border: 1px solid rgba(83, 169, 183, 0.1);
+}
+
+.form-card__field-label {
+  margin: 0;
+  color: var(--ink-strong);
+  font-weight: 700;
 }
 
 .composer-select,
@@ -2714,11 +3306,19 @@ onMounted(async () => {
 }
 
 .report-modal__summary,
+.report-modal__notice,
 .report-modal__section {
   padding: 18px 20px;
   border-radius: 22px;
   border: 1px solid rgba(83, 169, 183, 0.12);
   background: rgba(255, 255, 255, 0.9);
+}
+
+.report-modal__notice {
+  border-color: rgba(190, 143, 55, 0.22);
+  background: rgba(255, 250, 236, 0.94);
+  color: #7a5a21;
+  line-height: 1.75;
 }
 
 .report-modal__summary strong,
@@ -2743,6 +3343,30 @@ onMounted(async () => {
 .report-modal__list li {
   color: var(--ink);
   line-height: 1.7;
+}
+
+.elderly-page--large-text .chat-card__header p,
+.elderly-page--large-text .message-bubble__content,
+.elderly-page--large-text .composer-textarea,
+.elderly-page--large-text .voice-panel__copy strong,
+.elderly-page--large-text .summary-stat span,
+.elderly-page--large-text .session-item__copy,
+.elderly-page--large-text .status-chip,
+.elderly-page--large-text .report-modal__body {
+  font-size: 1.12rem;
+}
+
+.elderly-page--large-text .message-bubble__content,
+.elderly-page--large-text .report-modal__body {
+  line-height: 1.95;
+}
+
+.elderly-page--large-text .choice-chip,
+.elderly-page--large-text .composer-submit,
+.elderly-page--large-text .secondary-button,
+.elderly-page--large-text .primary-button,
+.elderly-page--large-text .ghost-button {
+  font-size: 1.05rem;
 }
 
 @media (max-width: 1100px) {
@@ -2842,6 +3466,449 @@ onMounted(async () => {
   .report-modal__actions {
     flex-direction: column;
     align-items: stretch;
+  }
+}
+
+/* Design-shot layout override */
+.elderly-page {
+  width: 100%;
+  margin: 0;
+  padding-right: 28px;
+  padding-left: 28px;
+  padding-top: 0;
+  background: #eef7f8;
+}
+
+.assessment-layout {
+  min-height: calc(100vh - 122px);
+  height: calc(100vh - 122px);
+  grid-template-columns: minmax(0, 1fr) 372px;
+  gap: 0;
+  align-items: stretch;
+  background: #eef7f8;
+  border-radius: 0;
+  overflow: hidden;
+}
+
+.chat-card {
+  height: calc(100vh - 122px);
+  min-height: 760px;
+  padding: 0 24px 222px 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: #eef7f8;
+  box-shadow: none;
+}
+
+.chat-card::before {
+  display: none;
+}
+
+.chat-card__header {
+  min-height: 68px;
+  padding: 22px 0 10px 0;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.chat-card__intro {
+  display: flex;
+  align-items: center;
+  gap: 34px;
+  max-width: none;
+}
+
+.chat-card__intro .eyebrow,
+.chat-card__lead {
+  display: none;
+}
+
+.chat-card__header h2 {
+  margin: 0;
+  color: #05080c;
+  font-size: 1.86rem;
+  line-height: 1.2;
+  font-weight: 900;
+}
+
+.chat-card__header-actions {
+  max-width: none;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 20px;
+}
+
+.chat-card__header-actions p {
+  color: #8b939a;
+  text-align: left;
+  font-size: 1.05rem;
+}
+
+.chat-card__header-tools {
+  gap: 8px;
+}
+
+.copy-id-button {
+  min-width: auto;
+  min-height: 34px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: #2b8696;
+  box-shadow: none;
+  font-weight: 900;
+}
+
+.chat-stream {
+  flex: 1;
+  margin-top: 0;
+  padding: 18px 18px 28px 0;
+  gap: 58px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  scrollbar-color: rgba(171, 181, 187, 0.55) transparent;
+}
+
+.message-bubble {
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 16px;
+  width: 100%;
+  max-width: 100%;
+}
+
+.message-bubble--assistant {
+  justify-self: stretch;
+}
+
+.message-bubble--user {
+  justify-self: end;
+  width: min(420px, 38%);
+  grid-template-columns: minmax(0, 1fr) 56px;
+}
+
+.message-bubble__avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
+}
+
+.message-bubble__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.message-bubble--assistant .message-bubble__avatar,
+.message-bubble--user .message-bubble__avatar {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.message-bubble--assistant .message-bubble__panel {
+  width: min(100%, 1330px);
+  padding: 22px 26px 24px;
+  border-radius: 0 16px 16px 16px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: none;
+}
+
+.message-bubble--user .message-bubble__panel {
+  padding: 14px 20px;
+  border-radius: 14px;
+  background: #4aa0a3;
+  color: #fff;
+  box-shadow: none;
+}
+
+.message-bubble__meta {
+  justify-content: flex-start;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+
+.message-bubble__role {
+  color: #6b7378;
+  font-size: 1rem;
+}
+
+.message-bubble__time {
+  color: #8d969c;
+  font-size: 1rem;
+}
+
+.message-bubble--user .message-bubble__meta {
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.message-bubble--user .message-bubble__role,
+.message-bubble--user .message-bubble__time,
+.message-bubble--user .message-bubble__content {
+  color: #fff;
+}
+
+.message-bubble--user .message-bubble__content.markdown-body :deep(*) {
+  color: #fff;
+}
+
+.message-bubble__content {
+  color: #353535;
+  font-size: 1.08rem;
+  line-height: 1.85;
+}
+
+.message-bubble__content.markdown-body :deep(strong),
+.message-bubble__content.markdown-body :deep(h1),
+.message-bubble__content.markdown-body :deep(h2),
+.message-bubble__content.markdown-body :deep(h3),
+.message-bubble__content.markdown-body :deep(h4) {
+  color: #05080c;
+  font-weight: 900;
+}
+
+.message-bubble__content.markdown-body :deep(p:last-child),
+.message-bubble__content.markdown-body :deep(h4:last-child) {
+  color: #2b969d;
+  font-weight: 900;
+}
+
+.message-bubble--user .message-bubble__content.markdown-body :deep(p),
+.message-bubble--user .message-bubble__content.markdown-body :deep(p:last-child),
+.message-bubble--user .message-bubble__content.markdown-body :deep(strong),
+.message-bubble--user .message-bubble__content.markdown-body :deep(h1),
+.message-bubble--user .message-bubble__content.markdown-body :deep(h2),
+.message-bubble--user .message-bubble__content.markdown-body :deep(h3),
+.message-bubble--user .message-bubble__content.markdown-body :deep(h4),
+.message-bubble--user .message-bubble__content.markdown-body :deep(h4:last-child) {
+  color: #fff;
+}
+
+.speech-button {
+  min-width: 42px;
+  min-height: 28px;
+  box-shadow: none;
+}
+
+.chat-composer {
+  position: absolute;
+  right: 24px;
+  bottom: 0;
+  left: 0;
+  margin: 0;
+}
+
+.composer-shell {
+  min-height: 200px;
+  padding: 24px 28px;
+  border: 1px solid rgba(185, 202, 213, 0.6);
+  border-radius: 0 24px 24px 24px;
+  background: #fff;
+  box-shadow: 0 -6px 20px rgba(58, 73, 84, 0.08);
+}
+
+.composer-shell__header {
+  margin-bottom: 20px;
+}
+
+.composer-label {
+  color: #05080c;
+  font-size: 1.08rem;
+  font-weight: 900;
+}
+
+.composer-textarea {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #05080c;
+  font-size: 1.1rem;
+  box-shadow: none;
+}
+
+.composer-actions {
+  margin-top: 22px;
+}
+
+.voice-button {
+  min-width: 174px;
+  min-height: 52px;
+  border-radius: 999px;
+  color: #05080c;
+  border-color: rgba(185, 202, 213, 0.8);
+  background: #fff;
+  font-size: 1.06rem;
+}
+
+.voice-panel__copy {
+  display: none;
+}
+
+.composer-submit {
+  min-width: 170px;
+  min-height: 58px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #61bcc4, #168b9f);
+  font-size: 1.08rem;
+  font-weight: 900;
+}
+
+.side-panel {
+  height: calc(100vh - 122px);
+  padding-left: 24px;
+  border-left: 1px solid rgba(175, 190, 198, 0.65);
+  gap: 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.summary-card,
+.session-card,
+.side-panel :deep(.profile-overview) {
+  padding: 18px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.summary-card h1 {
+  margin: 0 0 18px;
+  color: #05080c;
+  font-size: 1.9rem;
+  line-height: 1.25;
+  font-weight: 900;
+}
+
+.summary-card .eyebrow {
+  float: right;
+  margin-top: 8px;
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: 1rem;
+  color: #2b969d;
+}
+
+.summary-stats {
+  margin-top: 0;
+  padding: 18px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  border: 2px solid rgba(43, 150, 157, 0.55);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.summary-stat {
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.summary-stat span {
+  color: #8b939a;
+  font-size: 1rem;
+}
+
+.summary-stat strong {
+  margin: 0;
+  color: #2b969d;
+  font-size: 1.34rem;
+  font-weight: 900;
+}
+
+.summary-card__actions {
+  margin-top: 22px;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.summary-card__action {
+  min-height: 58px;
+  border: 0;
+  border-radius: 999px;
+  background: #d8e9ec;
+  color: #2b969d;
+  box-shadow: none;
+  font-weight: 900;
+  font-size: 1.04rem;
+}
+
+.summary-card__action.primary-button {
+  color: #2b969d;
+  background: #d8e9ec;
+}
+
+.summary-card__actions .ghost-button {
+  background: #fff;
+  color: #8b939a;
+  border: 1px solid rgba(185, 202, 213, 0.8);
+}
+
+.panel-header,
+.session-card > .panel-header {
+  padding: 18px 16px;
+  border-radius: 12px 12px 0 0;
+  background: #fff;
+  border-bottom: 1px solid rgba(225, 229, 232, 0.8);
+}
+
+.panel-header h3 {
+  color: #05080c;
+  font-size: 1.15rem;
+}
+
+.session-list {
+  margin-top: 0;
+  padding: 16px;
+  max-height: 210px;
+  background: #fff;
+  border-radius: 0 0 12px 12px;
+}
+
+.session-item {
+  padding: 14px;
+  border-radius: 12px;
+  border-color: rgba(43, 150, 157, 0.3);
+  box-shadow: none;
+}
+
+.status-chip {
+  min-height: 28px;
+  background: #edf5f5;
+  color: #2b969d;
+}
+
+@media (max-width: 1100px) {
+  .assessment-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-card {
+    height: auto;
+    min-height: 720px;
+  }
+
+  .side-panel {
+    padding-left: 0;
+    border-left: 0;
   }
 }
 </style>

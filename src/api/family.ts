@@ -126,6 +126,16 @@ export function updateFamilyElderly(elderlyId: string, token: string, payload: R
   })
 }
 
+export function unbindFamilyElderly(elderlyId: string, token: string) {
+  return requestJson<{ success: boolean; elderly_id?: string; elderly_ids?: string[] }>(
+    `/family/elderly/${elderlyId}/binding`,
+    {
+      method: 'DELETE',
+      headers: buildAuthHeaders(token)
+    }
+  )
+}
+
 export async function getFamilyReports(elderlyId: string, token: string) {
   const response = await requestJson<unknown>(`/family/reports/${elderlyId}`, {
     headers: buildAuthHeaders(token)

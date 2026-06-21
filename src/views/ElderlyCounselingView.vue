@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/core'
 import {
@@ -13,6 +13,9 @@ import {
 import { useGoogleStreamingSpeech } from '@/composables/useGoogleStreamingSpeech'
 import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
 import { useSpeechSynthesis } from '@/composables/useSpeechSynthesis'
+import chatAssistantAvatar from '@/assets/lanhu/chat-assistant-avatar.png'
+import chatUserAvatar from '@/assets/lanhu/chat-user-avatar.png'
+import iconNewAssessment from '@/assets/lanhu/icon-new-assessment.png'
 import {
   getStoredElderlyCounselingSessionId,
   getStoredElderlySession,
@@ -218,6 +221,26 @@ function buildWelcomeMessages() {
   ] satisfies ChatMessage[]
 }
 
+async function speakWelcomeMessage() {
+  const welcomeMessage = messages.value[0]
+  const welcomeText = welcomeMessage?.role === 'assistant' ? welcomeMessage.content.trim() : ''
+  if (!welcomeText || !isTtsSupported.value) {
+    return
+  }
+
+  await nextTick()
+  if (isTtsSpeaking.value) {
+    stopSpeaking()
+  }
+
+  speakingMessageIndex.value = 0
+  void speakText(welcomeText).catch(() => {
+    if (speakingMessageIndex.value === 0) {
+      speakingMessageIndex.value = null
+    }
+  })
+}
+
 async function scrollChatToBottom() {
   await nextTick()
   chatBodyRef.value?.scrollTo({
@@ -256,6 +279,7 @@ async function loadSession(targetSessionId: string, token: string) {
   loading.value = true
   errorMessage.value = ''
   clearVoiceInput()
+  stopSpeaking()
 
   try {
     activeSessionId.value = targetSessionId
@@ -268,6 +292,10 @@ async function loadSession(targetSessionId: string, token: string) {
   } finally {
     loading.value = false
     await scrollChatToBottom()
+  }
+
+  if (messages.value.length === 1 && messages.value[0]?.content === COUNSELING_WELCOME_MESSAGE) {
+    await speakWelcomeMessage()
   }
 }
 
@@ -286,6 +314,7 @@ async function createAndOpenSession(skipConfirm = false) {
   creatingSession.value = true
   errorMessage.value = ''
   clearVoiceInput()
+  stopSpeaking()
 
   try {
     const response = await createCounselingSession(elderlyToken.value)
@@ -306,14 +335,13 @@ async function createAndOpenSession(skipConfirm = false) {
 
     await refreshSessions(elderlyToken.value)
     await scrollChatToBottom()
+    await speakWelcomeMessage()
   } catch (error) {
-    if (isAuthError(error)) {
-      await router.replace('/elderly/assessment')
-      return
-    }
-
-    errorMessage.value =
-      error instanceof Error ? error.message : '创建心理咨询会话失败，请稍后重试。'
+    errorMessage.value = isAuthError(error)
+      ? '当前长者登录状态已失效，请重新从长者端进入后再试。'
+      : error instanceof Error
+        ? error.message
+        : '创建心理咨询会话失败，请稍后重试。'
   } finally {
     creatingSession.value = false
   }
@@ -322,7 +350,7 @@ async function createAndOpenSession(skipConfirm = false) {
 async function initializeCounseling() {
   const preferredSession = resolvePreferredElderlySession()
   if (!preferredSession) {
-    await router.replace('/elderly/assessment')
+    errorMessage.value = '未找到可用的长者登录状态，请先返回评估页重新进入。'
     return
   }
 
@@ -342,13 +370,11 @@ async function initializeCounseling() {
 
     await loadSession(targetSessionId, preferredSession.token)
   } catch (error) {
-    if (isAuthError(error)) {
-      await router.replace('/elderly/assessment')
-      return
-    }
-
-    errorMessage.value =
-      error instanceof Error ? error.message : '加载心理咨询内容失败，请稍后重试。'
+    errorMessage.value = isAuthError(error)
+      ? '当前长者登录状态已失效，请重新从长者端进入后再试。'
+      : error instanceof Error
+        ? error.message
+        : '加载心理咨询内容失败，请稍后重试。'
   }
 }
 
@@ -375,6 +401,7 @@ async function handleSend() {
   sending.value = true
   errorMessage.value = ''
   clearVoiceInput()
+  stopSpeaking()
 
   messages.value.push({
     role: 'user',
@@ -427,21 +454,34 @@ async function handleSend() {
     })
 
     await refreshSessions(elderlyToken.value)
+    autoSpeakAssistantMessage(messages.value[assistantIndex]?.content || assistantMessage.content, assistantIndex)
   } catch (error) {
     if (!messages.value[assistantIndex]?.content) {
       messages.value.splice(assistantIndex, 1)
     }
 
-    if (isAuthError(error)) {
-      await router.replace('/elderly/assessment')
-      return
-    }
-
-    errorMessage.value =
-      error instanceof Error ? error.message : '发送失败，请稍后重试。'
+    errorMessage.value = isAuthError(error)
+      ? '当前长者登录状态已失效，请重新从长者端进入后再试。'
+      : error instanceof Error
+        ? error.message
+        : '发送失败，请稍后重试。'
   } finally {
     sending.value = false
   }
+}
+
+function autoSpeakAssistantMessage(content: string, index: number) {
+  const nextContent = content.trim()
+  if (!nextContent || !isTtsSupported.value) {
+    return
+  }
+
+  if (isTtsSpeaking.value) {
+    stopSpeaking()
+  }
+
+  speakingMessageIndex.value = index
+  void speakText(nextContent)
 }
 
 function handleSpeakMessage(content: string, index: number) {
@@ -455,7 +495,11 @@ function handleSpeakMessage(content: string, index: number) {
     stopSpeaking()
   }
   // 开始播放新消息
-  speakText(content)
+  void speakText(content).catch(() => {
+    if (speakingMessageIndex.value === index) {
+      speakingMessageIndex.value = null
+    }
+  })
   speakingMessageIndex.value = index
 }
 
@@ -490,6 +534,16 @@ async function toggleVoiceInput() {
 onMounted(async () => {
   await initializeCounseling()
 })
+
+onUnmounted(() => {
+  clearVoiceInput()
+  stopSpeaking()
+})
+
+onBeforeRouteLeave(() => {
+  clearVoiceInput()
+  stopSpeaking()
+})
 </script>
 
 <template>
@@ -522,7 +576,12 @@ onMounted(async () => {
             class="message-bubble"
             :class="`message-bubble--${message.role}`"
           >
-            <span class="message-bubble__avatar">{{ message.role === 'assistant' ? '咨' : '我' }}</span>
+            <span class="message-bubble__avatar">
+              <img
+                :src="message.role === 'assistant' ? chatAssistantAvatar : chatUserAvatar"
+                :alt="message.role === 'assistant' ? '心理咨询助手' : '我'"
+              />
+            </span>
             <div class="message-bubble__panel">
               <div class="message-bubble__meta">
                 <span class="message-bubble__role">{{ message.role === 'assistant' ? '心理咨询助手' : '我' }}</span>
@@ -533,7 +592,6 @@ onMounted(async () => {
                   v-if="message.role === 'assistant' && message.content && isTtsSupported"
                   class="speech-button"
                   :class="{ 'speech-button--active': speakingMessageIndex === index }"
-                  :disabled="speakingMessageIndex === index && isTtsSpeaking"
                   @click="handleSpeakMessage(message.content, index)"
                 >
                   {{ (speakingMessageIndex === index && isTtsSpeaking) ? '⏸' : '🔊' }}
@@ -640,6 +698,7 @@ onMounted(async () => {
               :disabled="loading || sending || creatingSession"
               @click="createAndOpenSession()"
             >
+              <img class="tool-icon" :src="iconNewAssessment" alt="" />
               {{ creatingSession ? '创建中...' : '新建会话' }}
             </button>
             <button class="secondary-button summary-card__action" type="button" @click="router.push('/elderly/assessment')">
@@ -1242,5 +1301,391 @@ onMounted(async () => {
 
 .speech-button--active {
   background: rgba(83, 169, 183, 0.3);
+}
+
+/* Design-shot layout override */
+.elderly-page {
+  width: 100%;
+  margin: 0;
+  padding-right: 28px;
+  padding-left: 28px;
+  padding-top: 0;
+  background: #eef7f8;
+}
+
+.counseling-layout {
+  min-height: calc(100vh - 122px);
+  grid-template-columns: minmax(0, 1fr) 372px;
+  gap: 0;
+  align-items: stretch;
+  background: #eef7f8;
+}
+
+.chat-card {
+  min-height: calc(100vh - 122px);
+  padding: 26px 24px 222px 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: #eef7f8;
+  box-shadow: none;
+}
+
+.chat-card::before {
+  display: none;
+}
+
+.chat-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 28px;
+}
+
+.chat-card__intro {
+  max-width: none;
+  display: grid;
+  gap: 16px;
+}
+
+.chat-card__header h2 {
+  margin: 0;
+  color: #05080c;
+  font-size: 1.86rem;
+  line-height: 1.2;
+  font-weight: 900;
+}
+
+.chat-card__lead {
+  margin: 0;
+  color: #8b939a;
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.chat-card__header-actions {
+  justify-items: start;
+  padding-top: 0;
+}
+
+.chat-card__header-actions .ghost-button {
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #2b969d;
+  box-shadow: none;
+  font-weight: 900;
+}
+
+.chat-stream {
+  height: auto;
+  flex: 1;
+  min-height: 0;
+  margin-top: 28px;
+  padding: 0 18px 32px 0;
+  gap: 58px;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  scrollbar-color: rgba(171, 181, 187, 0.55) transparent;
+}
+
+.message-bubble {
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 16px;
+  width: 100%;
+  max-width: 100%;
+}
+
+.message-bubble--assistant {
+  justify-self: stretch;
+}
+
+.message-bubble--user {
+  justify-self: end;
+  width: min(360px, 34%);
+  grid-template-columns: minmax(0, 1fr) 56px;
+}
+
+.message-bubble__avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
+}
+
+.message-bubble__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.message-bubble--assistant .message-bubble__avatar,
+.message-bubble--user .message-bubble__avatar {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.message-bubble--assistant .message-bubble__panel {
+  width: min(100%, 1330px);
+  padding: 18px 26px 20px;
+  border-radius: 0 16px 16px 16px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: none;
+}
+
+.message-bubble--user .message-bubble__panel {
+  padding: 14px 20px;
+  border-radius: 14px;
+  background: #4aa0a3;
+  box-shadow: none;
+}
+
+.message-bubble__meta {
+  justify-content: flex-start;
+  gap: 18px;
+  margin-bottom: 12px;
+}
+
+.message-bubble__role {
+  color: #6b7378;
+  font-size: 1rem;
+}
+
+.message-bubble__time {
+  color: #8d969c;
+  font-size: 1rem;
+}
+
+.message-bubble--user .message-bubble__meta {
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.message-bubble--user .message-bubble__role,
+.message-bubble--user .message-bubble__time,
+.message-bubble--user .message-bubble__content {
+  color: #fff;
+}
+
+.message-bubble__content {
+  color: #353535;
+  font-size: 1.08rem;
+  line-height: 1.85;
+}
+
+.chat-composer {
+  position: absolute;
+  right: 24px;
+  bottom: 0;
+  left: 0;
+  margin: 0;
+}
+
+.composer-shell {
+  min-height: 200px;
+  padding: 24px 28px;
+  border: 1px solid rgba(185, 202, 213, 0.6);
+  border-radius: 0 24px 24px 24px;
+  background: #fff;
+  box-shadow: 0 -6px 20px rgba(58, 73, 84, 0.08);
+}
+
+.composer-label {
+  color: #05080c;
+  font-size: 1.08rem;
+  font-weight: 900;
+}
+
+.composer-textarea {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 1.1rem;
+  box-shadow: none;
+}
+
+.composer-actions {
+  margin-top: 22px;
+}
+
+.voice-button {
+  min-width: 174px;
+  min-height: 52px;
+  border-radius: 999px;
+  background: #fff;
+  color: #05080c;
+  border-color: rgba(185, 202, 213, 0.8);
+  font-size: 1.06rem;
+}
+
+.voice-panel__copy {
+  display: none;
+}
+
+.composer-submit {
+  min-width: 170px;
+  min-height: 58px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #61bcc4, #168b9f);
+  font-size: 1.08rem;
+  font-weight: 900;
+}
+
+.side-panel {
+  padding-left: 24px;
+  border-left: 1px solid rgba(175, 190, 198, 0.65);
+  gap: 24px;
+}
+
+.summary-card,
+.session-card {
+  padding: 18px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.summary-card .eyebrow {
+  float: right;
+  margin-top: 8px;
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: 1rem;
+  color: #2b969d;
+}
+
+.summary-card h2 {
+  margin: 0 0 18px;
+  color: #05080c;
+  font-size: 1.9rem;
+  line-height: 1.25;
+  font-weight: 900;
+}
+
+.summary-card__text {
+  margin-bottom: 18px;
+  color: #8b939a;
+}
+
+.summary-stats {
+  padding: 18px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  border: 2px solid rgba(43, 150, 157, 0.55);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.summary-stat {
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.summary-stat span {
+  color: #8b939a;
+}
+
+.summary-stat strong {
+  margin: 0;
+  color: #2b969d;
+  font-size: 1.34rem;
+  font-weight: 900;
+}
+
+.summary-card__actions {
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.summary-card__action {
+  min-height: 58px;
+  border: 0;
+  border-radius: 999px;
+  background: #d8e9ec;
+  color: #2b969d;
+  box-shadow: none;
+  font-size: 1.04rem;
+  font-weight: 900;
+}
+
+.summary-card__actions .secondary-button {
+  background: #fff;
+  color: #8b939a;
+  border: 1px solid rgba(185, 202, 213, 0.8);
+}
+
+.panel-header {
+  padding: 18px 16px;
+  border-radius: 12px 12px 0 0;
+  background: #fff;
+  border-bottom: 1px solid rgba(225, 229, 232, 0.8);
+}
+
+.panel-header h3 {
+  color: #05080c;
+  font-size: 1.15rem;
+}
+
+.session-list {
+  margin-top: 0;
+  padding: 16px;
+  max-height: 340px;
+  background: #fff;
+  border-radius: 0 0 12px 12px;
+}
+
+.session-item {
+  padding: 16px;
+  border-radius: 12px;
+  border-color: rgba(43, 150, 157, 0.3);
+  background: #fff;
+  box-shadow: none;
+}
+
+.session-item.is-active {
+  border-color: rgba(43, 150, 157, 0.55);
+  background: #eff8f7;
+}
+
+.session-item__marker {
+  background: #4aa0a3;
+  color: #fff;
+}
+
+.status-chip {
+  min-height: 28px;
+  background: #edf5f5;
+  color: #8b939a;
+}
+
+@media (max-width: 1080px) {
+  .counseling-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-card {
+    min-height: 720px;
+  }
+
+  .side-panel {
+    padding-left: 0;
+    border-left: 0;
+  }
 }
 </style>

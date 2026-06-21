@@ -46,6 +46,10 @@ const router = createRouter({
       component: () => import('@/views/ElderlyCounselingView.vue')
     },
     {
+      path: '/family',
+      redirect: '/family/hub'
+    },
+    {
       path: '/family/hub',
       name: 'family-hub',
       component: () => import('@/views/FamilyHubView.vue'),
@@ -63,6 +67,10 @@ const router = createRouter({
         requiresAuth: true,
         roles: ['family']
       }
+    },
+    {
+      path: '/doctor',
+      redirect: '/doctor/hub'
     },
     {
       path: '/doctor/hub',

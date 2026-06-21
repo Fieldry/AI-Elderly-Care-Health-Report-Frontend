@@ -30,6 +30,7 @@ cp .env.example .env
 |--------|------|--------|
 | `VITE_BACKEND_ORIGIN` | 后端服务地址（跳过代理，直接请求后端） | — |
 | `VITE_STT_WS_URL` | 语音识别 WebSocket 地址 | — |
+| `VITE_TTS_ENDPOINT` | 语音朗读接口地址，默认走 `/tts/synthesize` | `/tts/synthesize` |
 
 > 默认情况下无需配置 `.env`，开发服务器会自动将 API 请求代理到 `http://82.156.24.217:8080`。
 
@@ -63,6 +64,7 @@ npm run preview
 - `netlify.toml` 已将这些请求代理到 `http://82.156.24.217:8080`，这样可以避免 Netlify 的 HTTPS 页面直接请求 HTTP 后端时被浏览器拦截。
 - 如果你在 Netlify 后台配置了 `VITE_BACKEND_ORIGIN`，前端会跳过 Netlify 代理并直接请求该地址。部署到 Netlify 时通常不要设置这个变量，否则会重新触发浏览器的混合内容问题。
 - 语音识别使用的是 WebSocket。Netlify 的重写代理不适用于 WebSocket，因此生产环境需要后端额外提供可直连的 `wss://` 地址，并在 Netlify 环境变量中配置 `VITE_STT_WS_URL`。
+- 语音朗读默认会请求 `/tts/synthesize`，因此本地开发和 Netlify 代理都能直连到后端的晓晓音色；如你的 TTS 接口路径不同，可通过 `VITE_TTS_ENDPOINT` 覆盖。
 
 ## 项目结构
 

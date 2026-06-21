@@ -2,6 +2,7 @@
 import { computed, nextTick } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 
+import platformLogo from '@/assets/lanhu/platform-logo.png'
 import {
   clearStoredFamilyConversationSessions,
   clearStoredSession,
@@ -57,6 +58,10 @@ const currentRoleLabel = computed(() => {
 
 function isActive(item: NavItem) {
   if (route.path === '/') {
+    if (item.hash === '#overview' && !route.hash) {
+      return true
+    }
+
     return item.hash ? route.hash === item.hash : !route.hash
   }
 
@@ -107,7 +112,9 @@ async function handleLogout() {
     <header class="app-header">
       <div class="app-header__inner">
         <button class="brand-button" type="button" @click="router.push('/')">
-          <span class="brand-button__badge">AI</span>
+          <span class="brand-button__badge">
+            <img :src="platformLogo" alt="" />
+          </span>
           <span class="brand-button__copy">
             <strong>智养健康评估平台</strong>
             <small>长者采集、家属协同、医生研判</small>
