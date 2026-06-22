@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { loginWithPassword, registerFamilyAccount } from '@/api/auth'
@@ -13,7 +13,7 @@ import iconLinkedElderly from '@/assets/lanhu/icon-linked-elderly.png'
 import iconProfileEdit from '@/assets/lanhu/icon-profile-edit.png'
 import iconRecords from '@/assets/lanhu/icon-records.png'
 import iconReportClear from '@/assets/lanhu/icon-report-clear.png'
-import { roleHomePath, setStoredSession } from '@/session'
+import { roleHomePath, setStoredSession, useAuthSession } from '@/session'
 import type { AuthResponse, Role } from '@/types'
 
 const props = defineProps<{
@@ -23,6 +23,7 @@ const props = defineProps<{
 type FamilyEntryMode = 'login' | 'register'
 
 const router = useRouter()
+const { session } = useAuthSession()
 
 const roleContent = computed(() => {
   if (props.role === 'elderly') {
@@ -124,6 +125,15 @@ function resetError() {
   errorMessage.value = ''
 }
 
+async function redirectIfAlreadyLoggedIn() {
+  if (
+    (props.role === 'family' || props.role === 'doctor') &&
+    session.value?.role === props.role
+  ) {
+    await router.replace(roleHomePath(props.role))
+  }
+}
+
 function validateForm() {
   if (!form.phone.trim() || !form.password.trim()) {
     errorMessage.value = '请输入手机号和密码。'
@@ -191,6 +201,8 @@ async function handleContinue() {
 }
 
 onMounted(async () => {
+  await redirectIfAlreadyLoggedIn()
+
   try {
     const response = await getHealthStatus()
     healthStatusText.value = `${response.service} 当前状态：${response.status}`
@@ -198,6 +210,13 @@ onMounted(async () => {
     healthStatusText.value = '当前无法连接后端服务，请确认 API 已启动。'
   }
 })
+
+watch(
+  () => [props.role, session.value?.role] as const,
+  async () => {
+    await redirectIfAlreadyLoggedIn()
+  }
+)
 </script>
 
 <template>

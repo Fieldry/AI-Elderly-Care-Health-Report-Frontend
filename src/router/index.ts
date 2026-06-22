@@ -99,11 +99,23 @@ const router = createRouter({
 })
 
 router.beforeEach((to) => {
+  const session = getStoredSession()
+
+  if (to.name === 'access') {
+    const role = to.params.role
+    if (
+      typeof role === 'string' &&
+      (role === 'family' || role === 'doctor') &&
+      session?.role === role
+    ) {
+      return roleHomePath(role)
+    }
+  }
+
   if (!to.meta.requiresAuth) {
     return true
   }
 
-  const session = getStoredSession()
   const requiredRoles = (to.meta.roles || []) as Role[]
 
   if (!session) {
