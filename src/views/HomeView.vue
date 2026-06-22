@@ -18,6 +18,8 @@ import iconReportStatus from '@/assets/lanhu/icon-report-status.png'
 import iconReportSync from '@/assets/lanhu/icon-report-sync.png'
 import iconStructuredProfile from '@/assets/lanhu/icon-structured-profile.png'
 import iconVoice from '@/assets/lanhu/icon-voice.png'
+import { roleHomePath, useAuthSession } from '@/session'
+import type { Role } from '@/types'
 
 interface FeatureItem {
   title: string
@@ -25,7 +27,7 @@ interface FeatureItem {
 }
 
 interface RolePanel {
-  id: string
+  id: Role
   eyebrow: string
   titleSegments: Array<{
     text: string
@@ -39,6 +41,7 @@ interface RolePanel {
 }
 
 const route = useRoute()
+const { session } = useAuthSession()
 const landingPageRef = ref<HTMLElement | null>(null)
 
 const rolePanels: RolePanel[] = [
@@ -118,6 +121,14 @@ const overviewCards = [
   }
 ]
 
+function roleActionPath(role: Role) {
+  if ((role === 'family' || role === 'doctor') && session.value?.role === role) {
+    return roleHomePath(role)
+  }
+
+  return `/access/${role}`
+}
+
 async function scrollToHash(hash: string) {
   if (!hash) {
     landingPageRef.value?.scrollTo({
@@ -161,7 +172,7 @@ onMounted(async () => {
           </p>
           <div class="hero-actions">
             <RouterLink class="primary-button hero-button" to="/access/elderly">开始长者评估</RouterLink>
-            <RouterLink class="secondary-button hero-button" to="/access/family">家属登录</RouterLink>
+            <RouterLink class="secondary-button hero-button" :to="roleActionPath('family')">家属登录</RouterLink>
           </div>
 
           <div class="overview-list">
@@ -205,7 +216,7 @@ onMounted(async () => {
             </span>
           </h2>
           <p class="role-copy__text">{{ panel.description }}</p>
-          <RouterLink class="primary-button role-button" :to="panel.actionPath">{{ panel.actionLabel }}</RouterLink>
+          <RouterLink class="primary-button role-button" :to="roleActionPath(panel.id)">{{ panel.actionLabel }}</RouterLink>
 
           <div class="role-feature-panel" :class="`role-feature-panel--${panel.id}`">
             <p class="role-feature-panel__title">本端重点</p>
